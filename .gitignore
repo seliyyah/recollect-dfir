@@ -1,0 +1,28 @@
+# --- Third-party tools: download yourself, never commit (licenses + size) ---
+Tools/*
+!Tools/README.md
+
+# --- Evidence: never commit collected data ---
+Collections/
+*.raw
+*.mem
+*.dmp
+*.vmem
+*.E01
+*.aff4
+*.7z
+*.zip
+
+# --- Local notes / AI assistant files ---
+CLAUDE.md
+.claude/
+HANDOFF.md
+howtouse.md
+Collect_v3_UserGuide.md
+
+# --- OS / editor clutter ---
+Thumbs.db
+desktop.ini
+.DS_Store
+*.swp
+.vscode/

@@ -1,0 +1,12 @@
+# Normalize line endings; PowerShell scripts stay CRLF on checkout (Windows-only tool)
+* text=auto
+*.ps1  text eol=crlf
+*.psm1 text eol=crlf
+*.psd1 text eol=crlf
+*.md   text eol=lf
+
+# Never diff/merge binaries
+*.exe binary
+*.dll binary
+*.raw binary
+*.zip binary
