@@ -84,7 +84,8 @@ Only on a lab VM or a dedicated test machine. Snapshot the VM first.
 | EZ tools (KAPE-bundled .NET Framework builds) | Verified, including the SQLECmd map de-duplication. SQLECmd 2026.10.3 also needs its `runtimes\` folder in the working copy (fixed in 3.4.2; 27 databases parsed). |
 | Magnet RAM Capture, DumpIt command lines | **Unverified** (WinPmem is used first) |
 | Extra-internal-volume collection | **Unverified**: no test machine with a second internal disk yet |
-| `-Archive` / 7-Zip, `-NtpServer` | **Unverified** |
+| `-Archive -ArchivePassword` / 7-Zip 23.01 | Verified (Standard run: 1,088 files, 782 MB → 58 MB; listing without the password fails, so headers are encrypted; `.sha256` matches). The password has to be passed with `-Command`, since a SecureString can't pass through `-File`. |
+| `-NtpServer` | **Unverified** |
 
 ### 3.4.0 additions
 
@@ -95,7 +96,8 @@ First tested **without admin rights** through a harness that loads the script's 
 | Driver hashes, `EnumDeviceDrivers`, path normalization, `Triage`, LOLDrivers matching | Verified live (455 drivers; works even unelevated). Matched against a local file merged from the 713 LOLDrivers YAMLs (19,184 unique hashes): 0 hits on the clean laptop, case-insensitive lookup confirmed. |
 | Event log channel config, code integrity / `Win32_DeviceGuard`, Sysmon "not installed" path, virtual disks, service failure actions | Verified live |
 | Zone.Identifier native scan | Verified (fixtures + a real profile: 25,909 hits in 77 s from the snapshot) |
-| SSH, transcripts (default locations), Notepad/Sticky, MEGAsync, Defender quarantine copy, RMM presence + secret filtering | Verified on fixtures |
+| SSH, transcripts (default locations), Notepad/Sticky, MEGAsync, RMM presence + secret filtering | Verified on fixtures |
+| `-DefenderQuarantine` | Verified real (3.4.2): an EICAR test file quarantined by an active Defender was copied (Entries, ResourceData, Resources; 3 files, 0 failed). The Defender status collector was also run against an active Defender for the first time (detection listed). |
 | WFP: `netsh wfp show filters/state file=` and the summary parser | Verified elevated (922 filters, 20 BLOCK-by-app, app paths decoded from `asString`) |
 | `Get-SmbOpenFile` | Verified elevated (no open files) |
 | `logman query -ets` | Elevated, it **failed as a whole** on the lab laptop ("The GUID passed was not recognized as valid by a WMI data provider"). 3.4.1 adds `QueryAllTracesW` (`Get-EtwSessionName`) and `UNKNOWN` instead of a false "NOT running". The native enumeration is verified elevated (27 sessions, matching logman; unelevated it correctly returns 0). |

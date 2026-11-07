@@ -201,8 +201,8 @@ The 3.4 additions haven't been timed on the lab laptop yet. Allow some extra tim
 | `-LolDriversCsv C:\path\drivers.csv` | Local copy of the LOLDrivers export (CSV or JSON from loldrivers.io). Every MD5/SHA-1/SHA-256 in it is matched against `System\drivers_hashed.csv`. Any text file works, so the YAML files from the LOLDrivers repository can simply be concatenated into one file. The log shows how many hashes were loaded and how many drivers matched (column `LolDriversMatch`). No network access. | off |
 | `-DefenderQuarantine` | **Opt-in.** Copy Defender's quarantine to `Security\DefenderQuarantine\`. ⚠ These are **malware samples**. Never enabled by any profile. Use with `-Archive -ArchivePassword`; the script warns loudly if you archive without a password. | off |
 | `-NtpServer` | Compare the clock against an NTP server (needs network) | off |
-| `-Archive` | Zip or 7-Zip the finished collection | off |
-| `-ArchivePassword` | Encrypt the .7z (pass a SecureString: `(Read-Host -AsSecureString)`) | none |
+| `-Archive` | Zip or 7-Zip the finished collection into `<case folder>.7z`, with a `.7z.sha256` and a `.7z.log` beside it. The case folder itself is kept, unencrypted. | off |
+| `-ArchivePassword` | Encrypt the .7z with AES-256, file names included (pass a SecureString: `(Read-Host 'Archive password' -AsSecureString)`). A SecureString can't pass through `powershell.exe -File`, so use the `-Command "& .\Collect_v3.ps1 ... -ArchivePassword (Read-Host 'Archive password' -AsSecureString)"` form, or run the script directly. The password is given to 7-Zip on its command line, so hosts that log process command lines (Sysmon, event 4688, EDR) record it: use a password unique to the case. | none |
 
 ### 5.1 Extra internal drives
 

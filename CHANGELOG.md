@@ -17,6 +17,7 @@ Fixes and verification from an elevated Full + Memory run with `-YaraRules`, `-L
 - `-YaraRules` end to end with real Velociraptor 0.77.3: a benign test rule matched a marker typed into Notepad (1 hit, with a 48-byte context upload). The artifact's `YaraRule` and `ProcessRegex` parameters are confirmed in the saved definition.
 - LOLDrivers matching against a local file merged from the project's 713 YAML files (19,184 unique hashes): 455 drivers checked, 0 hits on the clean laptop.
 - On a USB 3 port, the I/O-bound steps are back at the baseline (memory image 252 s, RawCopy 283 s).
+- `-DefenderQuarantine` and `-Archive -ArchivePassword` on a Standard run (70 OK, no WARNs, about 7 minutes): an EICAR test file quarantined by Defender was copied, and the 7-Zip archive can't even be listed without the password. Pass the password with `-Command`, not `-File` (a SecureString can't pass through `-File`).
 
 ### Documentation
 - New user guide section 10, **bulk_extractor**: where to point it (memory image, pagefile and swapfile, Recycle Bin `$R`, `$LogFile`, converted hiberfil) and where not to (the whole case folder, parsed output, logs and hives), practical notes, and how it complements Volatility. The README links to it and credits Simson Garfinkel.
