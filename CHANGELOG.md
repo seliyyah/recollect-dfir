@@ -2,6 +2,27 @@
 
 All notable changes to `Collect_v3.ps1`. Format based on [Keep a Changelog](https://keepachangelog.com/); versions follow [Semantic Versioning](https://semver.org/).
 
+## [3.4.2]
+
+Fixes and verification from an elevated Full + Memory run with `-YaraRules`, `-LolDriversCsv` and `-VelociraptorArtifactArgs` on the lab laptop (104 OK, 1 WARN, 5 expected SKIPs, no FAILs; the WARN is fixed below).
+
+### Fixed
+- **A click in the console window could pause the whole run.** With the console's QuickEdit mode on (the Windows default), one click starts a text selection, and Windows blocks every write to that console until it is cleared. A lab run sat for 6.5 hours after a finished step, waiting to print one line. The script now turns QuickEdit off for its own console window at start (logged) and restores the previous mode at the end, or straight away if collection is aborted. No registry or system setting is changed.
+- **SQLECmd parsed nothing with current EZ Tools builds.** SQLECmd 2026.10.3 loads `SQLite.Interop.dll` from `runtimes\<platform>\native` next to the exe, and the script's clean working copy left that folder out, so SQLECmd exited at once (the step was correctly marked WARN). The `runtimes` folder is now copied too; the same collection then parsed 27 databases.
+
+### Changed
+- `-LolDriversCsv`: the log now says how many unique hashes were loaded and how many drivers matched (a match is logged in yellow). A file with no hashes in it marks the step WARN, because an empty list would otherwise look exactly like a clean host.
+
+### Verified
+- `-YaraRules` end to end with real Velociraptor 0.77.3: a benign test rule matched a marker typed into Notepad (1 hit, with a 48-byte context upload). The artifact's `YaraRule` and `ProcessRegex` parameters are confirmed in the saved definition.
+- LOLDrivers matching against a local file merged from the project's 713 YAML files (19,184 unique hashes): 455 drivers checked, 0 hits on the clean laptop.
+- On a USB 3 port, the I/O-bound steps are back at the baseline (memory image 252 s, RawCopy 283 s).
+
+### Documentation
+- New user guide section 10, **bulk_extractor**: where to point it (memory image, pagefile and swapfile, Recycle Bin `$R`, `$LogFile`, converted hiberfil) and where not to (the whole case folder, parsed output, logs and hives), practical notes, and how it complements Volatility. The README links to it and credits Simson Garfinkel.
+- `-VelociraptorArtifactArgs` takes a hashtable, which `powershell.exe -File` can't pass. The parameters table now shows the `-Command "& .\Collect_v3.ps1 ..."` form.
+- Troubleshooting entry for a run that looks frozen (QuickEdit).
+
 ## [3.4.1]
 
 Fixes from the first elevated Full + Memory run of 3.4.0 on the lab laptop (104 OK, 1 WARN, 5 expected SKIPs, no FAILs).

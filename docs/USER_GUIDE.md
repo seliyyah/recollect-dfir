@@ -1,6 +1,6 @@
 # Collect_v3 — Windows DFIR Collection Script: User Guide
 
-**Script version:** 3.4.1  **Runs on:** Windows 10 / 11 / Server 2016+ with Windows PowerShell 5.1  **Needs:** Administrator rights
+**Script version:** 3.4.2  **Runs on:** Windows 10 / 11 / Server 2016+ with Windows PowerShell 5.1  **Needs:** Administrator rights
 
 > 🛡️ Collect_v3 is a **blue-team** tool for incident responders, forensic analysts and researchers. It orchestrates freely available forensic tools, and their authors are credited in the [README](../README.md#credits). Please read [Purpose and responsible use](../README.md#purpose-and-responsible-use) before using it on a real case.
 
@@ -112,6 +112,7 @@ The script finds each tool by its **file name**, searching every folder under `T
 | Volatility 3 and/or MemProcFS | Memory image analysis |
 | DB Browser for SQLite | Browsing browser and app databases by hand |
 | Hayabusa or Chainsaw (optional) | Quick Sigma-rule hunting across `EventLogs\All\*.evtx` |
+| bulk_extractor (optional) | Carving URLs, domains, emails, IPs and packets from the memory image and pagefile. See section 10 |
 
 ---
 
@@ -195,9 +196,9 @@ The 3.4 additions haven't been timed on the lab laptop yet. Allow some extra tim
 | `-KapeVolumeTargets` | KAPE targets for extra internal drives | `FileSystem,RecycleBin` |
 | `-VelociraptorArtifact` | List of Velociraptor artifacts | 23 built-ins (section 7.12) |
 | `-VelociraptorArgs` | `Name=Value` parameters passed to **every** artifact | none |
-| `-VelociraptorArtifactArgs` | Parameters for **one** artifact: `@{ 'Windows.EventLogs.RDPAuth' = @('DateAfter=2026-01-01') }` | none |
-| `-YaraRules C:\path\rules.yar` | **Opt-in, Full only.** Scans process memory with these rules through Velociraptor. The rules file is copied into `Velociraptor\` and hashed. ⚠ Slow, and memory scanning can trigger EDR alerts. The rule text is passed on the command line, so files over ~30,000 characters must be split. | off |
-| `-LolDriversCsv C:\path\drivers.csv` | Local copy of the LOLDrivers export (CSV or JSON from loldrivers.io). Every MD5/SHA-1/SHA-256 in it is matched against `System\drivers_hashed.csv`. No network access. | off |
+| `-VelociraptorArtifactArgs` | Parameters for **one** artifact: `@{ 'Windows.EventLogs.RDPAuth' = @('DateAfter=2026-01-01') }`. A hashtable can't be passed through `powershell.exe -File`; launch with `-Command "& .\Collect_v3.ps1 ... -VelociraptorArtifactArgs @{...}"` or run the script directly from an elevated PowerShell prompt. | none |
+| `-YaraRules C:\path\rules.yar` | **Opt-in, Full only.** Scans process memory with these rules through Velociraptor. The rules file is copied into `Velociraptor\` and hashed. ⚠ Slow, and memory scanning can trigger EDR alerts. The rule text is passed on the command line, so files over ~30,000 characters must be split. To scan only some processes, add `-VelociraptorArtifactArgs @{'Windows.Detection.Yara.Process'=@('ProcessRegex=(?i)notepad')}` (the `-Command` form, see that row). Hits are in `Windows.Detection.Yara.Process.zip` → `results\*.json`. | off |
+| `-LolDriversCsv C:\path\drivers.csv` | Local copy of the LOLDrivers export (CSV or JSON from loldrivers.io). Every MD5/SHA-1/SHA-256 in it is matched against `System\drivers_hashed.csv`. Any text file works, so the YAML files from the LOLDrivers repository can simply be concatenated into one file. The log shows how many hashes were loaded and how many drivers matched (column `LolDriversMatch`). No network access. | off |
 | `-DefenderQuarantine` | **Opt-in.** Copy Defender's quarantine to `Security\DefenderQuarantine\`. ⚠ These are **malware samples**. Never enabled by any profile. Use with `-Archive -ArchivePassword`; the script warns loudly if you archive without a password. | off |
 | `-NtpServer` | Compare the clock against an NTP server (needs network) | off |
 | `-Archive` | Zip or 7-Zip the finished collection | off |
@@ -243,7 +244,7 @@ Every run creates `Collections\<CaseId>_<COMPUTER>_<yyyyMMddTHHmmssZ>\`, for exa
 | `<COMPUTER>_<stamp>.raw` | Full physical memory image (about the size of the RAM) |
 | `acquisition.log` | Output from the memory tool |
 
-**How to analyze:** **Volatility 3**, for example `vol -f image.raw windows.pslist`, then `windows.pstree`, `windows.cmdline`, `windows.netscan`, `windows.malfind`, `windows.svcscan`, `windows.dlllist`. **MemProcFS** mounts the image as a drive letter, so you can browse processes, handles and network connections as folders and files, and it can produce a timeline. Look for processes with odd parents (for example Word spawning PowerShell), injected code (`malfind`), and connections to unknown IP addresses.
+**How to analyze:** **Volatility 3**, for example `vol -f image.raw windows.pslist`, then `windows.pstree`, `windows.cmdline`, `windows.netscan`, `windows.malfind`, `windows.svcscan`, `windows.dlllist`. **MemProcFS** mounts the image as a drive letter, so you can browse processes, handles and network connections as folders and files, and it can produce a timeline. Look for processes with odd parents (for example Word spawning PowerShell), injected code (`malfind`), and connections to unknown IP addresses. For a second pass that finds URLs, domains, emails and packet fragments the plugins don't parse, run **bulk_extractor** on the image (section 10).
 
 ### 7.2 `System\`
 
@@ -371,7 +372,7 @@ The folder tree **mirrors the original paths** (`Disk\Windows\...` = `C:\Windows
 | `$Recycle.Bin\` | Deleted files: `$I` = metadata, `$R` = content (content only in Full) | Parsed in `Parsed\RBCmd` |
 | `NTFS\MFT_C.bin`, `LogFile_C.bin`, `Boot_C.bin` | Raw NTFS metadata: **every file** on the drive with its timestamps | Parsed in `Parsed\MFTECmd`; MFTExplorer |
 | `NTFS\UsnJrnl_fsutil_C.csv` | USN change journal: file create, rename and delete events. ⚠ **Timestamps are in local time, not UTC.** | Timeline Explorer |
-| `SystemFiles\` (Full) | `pagefile_C.sys`, `hiberfil_C.sys`, `swapfile_C.sys` | **hiberfil:** convert with Comae `Hibr2Bin.exe` (in the toolkit) and analyze with Volatility. **pagefile:** `strings`, YARA, bulk_extractor, or load beside the memory image in MemProcFS |
+| `SystemFiles\` (Full) | `pagefile_C.sys`, `hiberfil_C.sys`, `swapfile_C.sys` | **hiberfil:** convert with Comae `Hibr2Bin.exe` (in the toolkit) and analyze with Volatility. **pagefile:** `strings`, YARA, bulk_extractor (section 10), or load beside the memory image in MemProcFS |
 | `Accessibility_Binaries\` | Copies of sethc.exe / utilman.exe | Compare hashes with known-good |
 | `Volume_D\` (and so on) | Extra internal drives: `root_listing.csv`, `recyclebin_listing.csv`, `$Recycle.Bin\` | Timeline Explorer; RBCmd output |
 | `ProgramData\ssh\`, `Users\<u>\.ssh\` (Standard+) | OpenSSH `authorized_keys`, `administrators_authorized_keys`, `known_hosts`, `config`, `sshd_config`, public host keys and sshd logs. **Private keys are never copied.** A planted key is quiet persistence that Autoruns doesn't check. | Text editor: look for keys nobody recognizes |
@@ -491,6 +492,7 @@ How to view them:
 | Defender section shows `0x800106ba` | The Defender service isn't running. Expected on machines with another antivirus product; recorded in `defender.txt`. |
 | A collector shows WARN | Read its Note in `CollectorResults.csv`; usually one item failed and the rest succeeded |
 | Interrupted with Ctrl+C | The shadow copy and temp link are still removed. Check with `vssadmin list shadows`. |
+| The run seems frozen: no new lines for a long time, little CPU, title bar starts with **Select** | The console window was clicked while **QuickEdit** was on, and Windows pauses any program writing to a console with an active selection. Click the window and press **Esc** or **Enter**; it resumes at once with nothing lost. From 3.4.2 the script turns QuickEdit off for its own window during the run (log line `Console QuickEdit turned off`) and restores it at the end. A host run with an older version, or a console where that can't be changed, can still freeze this way. |
 
 ---
 
@@ -576,6 +578,64 @@ How to view them:
 6. Check `Persistence\` and `Tools\autoruns.csv` for anything it set up to survive a reboot.
 7. On each finding, **clear the filter while the row is selected** to see what happened around it.
 8. **Tag** every relevant row, **File → Save Session**, then filter Tag = checked and **Ctrl+C** the rows into your report.
+
+---
+
+## 10. bulk_extractor: carving the raw files
+
+**bulk_extractor** (Simson Garfinkel; [github.com/simsong/bulk_extractor](https://github.com/simsong/bulk_extractor)) ignores file systems and file formats. It reads raw bytes and pulls out *features*: URLs, domains, email addresses, IP addresses, network packets, JSON, and the contents of compressed or base64-encoded data. That makes it a good second pass over the raw, unstructured files Collect_v3 collects, and a poor one over everything else.
+
+Run it **afterwards, on your analysis workstation, against a copy** of the collection, never on the suspect machine. It is CPU-heavy, and Collect_v3 deliberately stops at collection.
+
+**Getting it:** use a tested build from the project's [releases page](https://github.com/simsong/bulk_extractor/releases); the main branch is a development tree. If the release you want has no Windows build, run it in WSL or a Linux forensic VM (the SANS SIFT Workstation includes it) and point it at the collection over a read-only share.
+
+### 10.1 Where to point it, and why
+
+| Target | Why |
+|---|---|
+| **Memory image:** `Memory\<COMPUTER>_<stamp>.raw` | **The best target.** It recovers URLs, domains, emails and IPs from RAM, including from processes that have already exited and data no Volatility plugin parses. Its network scanner rebuilds packet fragments left in memory into a `.pcap`, which is valuable when there was no network capture. The domain and URL histograms make a fast IOC list. |
+| **`Disk\SystemFiles\pagefile_C.sys`, `swapfile_C.sys`** (Full) | Memory that Windows pushed out to disk. It often holds older activity that is no longer in the RAM image. |
+| **`Disk\$Recycle.Bin\...\$R*`** (Full) and **`Disk\NTFS\LogFile_C.bin`** | Fragments of deleted or recently changed content. |
+| **`Disk\SystemFiles\hiberfil_C.sys`** (Full) | **Only after converting it** with Comae `Hibr2Bin.exe` or Volatility. From Windows 8 on, the hibernation file is compressed in a format bulk_extractor can't read directly, so the raw file gives little. Treat the converted file like a second memory image. |
+
+**Not worth scanning:**
+
+- **The whole case folder.** `Parsed\`, `KAPE\`, `Velociraptor\` and the CSVs are already structured. Scanning them returns the same URLs from several sources and buries the useful hits.
+- **Event logs and registry hives.** The EZ tools, Timeline Explorer and Registry Explorer read these properly. Carving them adds noise, not information.
+
+### 10.2 Practical notes
+
+- **The output folder must not exist yet;** bulk_extractor creates it. One folder per input keeps results apart:
+
+  ```powershell
+  bulk_extractor -o E:\Analysis\IR-001_mem "E:\Collections\<case folder>\Memory\<COMPUTER>_<stamp>.raw"
+  bulk_extractor -o E:\Analysis\IR-001_pagefile "E:\Collections\<case folder>\Disk\SystemFiles\pagefile_C.sys"
+  ```
+
+- **Start with the histograms:** `domain_histogram.txt`, `url_histogram.txt` and `email_histogram.txt`, ranked by count. Rare entries near the bottom are often more interesting than the top ones, which are usually Microsoft, Google and CDN domains.
+- **Then open the matching feature files** (`domain.txt`, `url.txt`, `email.txt`, `ip.txt`). Each hit has its **byte offset** in the image and a little surrounding context, which you use to tie it back to a process (see 10.3).
+- **Network output:** `packets.pcap` (open in Wireshark) and `ip.txt`. Expect fragments, not whole conversations.
+- **Time:** roughly 30–60 minutes for a 32 GB image, depending on the CPU. It uses every core.
+- **Handle the output as evidence.** It contains whatever was in memory, which can include session tokens, credentials in URLs and personal data.
+
+### 10.3 How it complements Volatility
+
+They answer different questions, so use both:
+
+| | Volatility 3 / MemProcFS | bulk_extractor |
+|---|---|---|
+| **Approach** | Rebuilds Windows' own structures: process list, threads, handles, sockets, loaded modules | Ignores structure; scans every byte for patterns |
+| **Strength** | **Context:** which process, which user, when it started, what it had open | **Coverage:** finds strings in freed memory, exited processes and data structures no plugin parses |
+| **Weakness** | Sees only what its plugins understand; misses data that has been freed | No context: a hit is just bytes at an offset |
+
+**Typical workflow:**
+
+1. Run bulk_extractor on the memory image and read the domain and URL histograms for anything unexpected.
+2. Note the offset of an interesting hit from the feature file.
+3. In Volatility, find what owns that region: `windows.pslist` / `windows.vadinfo` to map process memory, or `windows.netscan` for a matching connection. In MemProcFS, search the mounted process folders for the same string.
+4. Feed new indicators back: hunt the domain in the parsed browser history (section 7.13) and the IP in `Network\` and the event logs.
+
+Volatility tells you *who* and *when*; bulk_extractor tells you *what else is in there*.
 
 ---
 

@@ -77,11 +77,11 @@ Only on a lab VM or a dedicated test machine. Snapshot the VM first.
 | Tool | Status |
 |---|---|
 | KAPE 1.3.0.2 (`--tsource --tdest --target --tflush --vss --module --mdest --mflush`) | Verified (full run) |
-| Velociraptor 0.77.3 (`artifacts list`, `artifacts collect <name> --output <zip>`) | Verified (17 artifacts; the 5 browser artifacts added in 3.3.1 are in the build list but not yet run) |
+| Velociraptor 0.77.3 (`artifacts list`, `artifacts collect <name> --output <zip>`) | Verified (24 artifacts including the 5 browser artifacts and `Windows.Detection.Yara.Process`, 0 failed) |
 | go-winpmem (`acquire --nosparse <file>`) | Verified (33.5 GB image) |
 | RawCopy 1.0.0.22 (`/FileNamePath:C:0`, `C:2`, `C:7`, file paths for paging files) | Verified. `$UsnJrnl:$J` is **not** supported. |
 | `fsutil usn queryjournal` / `readjournal <drive> csv` | Verified |
-| EZ tools (KAPE-bundled .NET Framework builds) | Verified, including the SQLECmd map de-duplication |
+| EZ tools (KAPE-bundled .NET Framework builds) | Verified, including the SQLECmd map de-duplication. SQLECmd 2026.10.3 also needs its `runtimes\` folder in the working copy (fixed in 3.4.2; 27 databases parsed). |
 | Magnet RAM Capture, DumpIt command lines | **Unverified** (WinPmem is used first) |
 | Extra-internal-volume collection | **Unverified**: no test machine with a second internal disk yet |
 | `-Archive` / 7-Zip, `-NtpServer` | **Unverified** |
@@ -92,7 +92,7 @@ First tested **without admin rights** through a harness that loads the script's 
 
 | Item | Status |
 |---|---|
-| Driver hashes, `EnumDeviceDrivers`, path normalization, `Triage`, LOLDrivers matching | Verified live (456 drivers; works even unelevated) |
+| Driver hashes, `EnumDeviceDrivers`, path normalization, `Triage`, LOLDrivers matching | Verified live (455 drivers; works even unelevated). Matched against a local file merged from the 713 LOLDrivers YAMLs (19,184 unique hashes): 0 hits on the clean laptop, case-insensitive lookup confirmed. |
 | Event log channel config, code integrity / `Win32_DeviceGuard`, Sysmon "not installed" path, virtual disks, service failure actions | Verified live |
 | Zone.Identifier native scan | Verified (fixtures + a real profile: 25,909 hits in 77 s from the snapshot) |
 | SSH, transcripts (default locations), Notepad/Sticky, MEGAsync, Defender quarantine copy, RMM presence + secret filtering | Verified on fixtures |
@@ -100,16 +100,19 @@ First tested **without admin rights** through a harness that loads the script's 
 | `Get-SmbOpenFile` | Verified elevated (no open files) |
 | `logman query -ets` | Elevated, it **failed as a whole** on the lab laptop ("The GUID passed was not recognized as valid by a WMI data provider"). 3.4.1 adds `QueryAllTracesW` (`Get-EtwSessionName`) and `UNKNOWN` instead of a false "NOT running". The native enumeration is verified elevated (27 sessions, matching logman; unelevated it correctly returns 0). |
 | Velociraptor per-artifact args, `Windows.EventLogs.RDPAuth` | Verified real (23 artifacts, 0 failed, 388 s) |
-| Velociraptor YARA (rule text with newlines and quotes) | Verified against a **mock** Velociraptor only. The `YaraRule` parameter name is read at run time from `artifacts show`. Real `-YaraRules` run **unverified**. |
+| Velociraptor YARA (rule text with newlines and quotes) | Verified real: a test rule matching a marker typed into Notepad, with `-VelociraptorArtifactArgs @{'Windows.Detection.Yara.Process'=@('ProcessRegex=(?i)notepad')}`, gave 1 hit in notepad.exe (rule, offset and a 48-byte context upload). `YaraRule` and `ProcessRegex` confirmed in the saved artifact definition. |
 | Sysmon `-c` with Sysmon installed, IIS (`appcmd list vdir`), transcription policy folders, MeshAgent/NetSupport/SimpleHelp/Action1 discovery, ScreenConnect transfer folder | **Unverified**: not installed on the lab laptop |
 | Exfil tools: version-info match on a renamed real rclone | **Unverified** (name match and `rclone.conf` parsing verified) |
 | MEGAsync log folder path | **Unverified** (community-documented) |
-| Run time with the 3.4 additions | The new collectors total ≈ 4.5 min. The 3.4.0 Full + Memory run took 130 min and 73 GB against a 92 min baseline, but the extra time was all I/O-bound steps (memory image 255 → 1012 s, RawCopy 298 → 689 s, KAPE 2325 → 3066 s): the output drive ran at USB 2.0 speed (~33 MB/s). Re-measure on a USB 3 port. |
+| Run time with the 3.4 additions | The new collectors total ≈ 4.5 min. The 3.4.0 Full + Memory run took 130 min and 73 GB against a 92 min baseline, but the extra time was all I/O-bound steps (memory image 255 → 1012 s, RawCopy 298 → 689 s, KAPE 2325 → 3066 s): the output drive ran at USB 2.0 speed (~33 MB/s). Re-measured on a USB 3 port (3.4.2): memory 252 s, RawCopy 283 s, USN 372 s, Velociraptor 376 s (24 artifacts), Sigcheck 519 + 256 s, all back at the baseline. KAPE took 2752 s because the host now has one more shadow copy (4 vs 3, 15.8 vs 12.6 GB). |
 
-Fixtures still to build on the lab laptop (from the 3.4.0 handoff): load a benign signed test driver through a service and delete the service key; add a WFP block filter for a dummy app; shrink and disable test event-log channels; `sc failure <testsvc> actions= run/60000 command= ...`; a real renamed rclone; a Notepad unsaved tab on Windows 11; a YARA rule matching a known running process.
+Fixtures still to build on the lab laptop (from the 3.4.0 handoff): load a benign signed test driver through a service and delete the service key; add a WFP block filter for a dummy app; shrink and disable test event-log channels; `sc failure <testsvc> actions= run/60000 command= ...`; a real renamed rclone; a Notepad unsaved tab on Windows 11; a YARA rule matching a known running process (done in 3.4.2).
 
 ## Known benign output
 
 - `<tool>.err` files containing only a Sysinternals copyright banner.
 - `Skipped ...: needs .NET 10.0.0 runtime` during tool discovery, when a KAPE-bundled fallback is found.
 - `wfp_block_summary.csv` rows with provider `FWPM_PROVIDER_MPSSVC_WSH` (Windows Service Hardening: SearchFilterHost, dmcertinst, omadmclient and similar). A clean Windows 10 host has about 20 of them.
+- SQLECmd console: `SQL logic error` for the maps *Edge Browser History Screenshots* and *Windows Your Phone Settings DB*. The map queries don't match every database version; SQLECmd exits 0 and parses the rest.
+- `Velociraptor\Windows.Applications.Edge.History_console.log.err`: `Symbol Source not found`. One query in Velociraptor 0.77.3's own Edge.History artifact; the zip still holds the history rows and the step is OK.
+- Velociraptor YARA log: `yara: Warning unknown shorthand directive //`. A rules file that starts with a comment; the rule is still compiled and used.

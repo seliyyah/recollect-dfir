@@ -59,7 +59,7 @@
                               NOTE: 7-Zip receives the password on its command line (visible to local admins).
 
 .NOTES
-    Version : 3.4.1
+    Version : 3.4.2
     Tested  : syntax-targeted at Windows PowerShell 5.1 (the common endpoint default).
     VERIFY  : Command-line syntax for third-party tools (memory imagers, RawCopy, Zimmerman tools,
               KAPE, Velociraptor) changes between versions. Test each against the exact versions
@@ -114,7 +114,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Continue'
 $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
 
-$ScriptVersion  = '3.4.1'
+$ScriptVersion  = '3.4.2'
 $ScriptStartUtc = [DateTime]::UtcNow
 $Inv            = [Globalization.CultureInfo]::InvariantCulture
 
@@ -139,6 +139,36 @@ function Write-Log {
     )
     $color = @{ INFO = 'Gray'; WARN = 'Yellow'; ERROR = 'Red'; OK = 'Green'; SKIP = 'DarkYellow' }[$Level]
     Write-Host ('[{0}] [{1,-5}] {2}' -f (Get-UtcStamp), $Level, $Message) -ForegroundColor $color
+}
+
+# QuickEdit: one stray click in the console window starts a text selection, and Windows then blocks every
+# write to that console (and so the whole run) until the selection is cleared. Turn it off for this console
+# only while collecting; the previous mode is restored at the end. No registry or system setting is touched.
+# Returns $true if QuickEdit was on and is now off; $false if there is no console or nothing to change.
+$script:SavedConsoleMode = $null
+function Disable-QuickEdit {
+    try {
+        if (-not ('DfirNative.Con' -as [type])) {
+            Add-Type -Namespace DfirNative -Name Con -MemberDefinition @'
+[DllImport("kernel32.dll", SetLastError = true)] public static extern IntPtr GetStdHandle(int nStdHandle);
+[DllImport("kernel32.dll", SetLastError = true)] public static extern bool GetConsoleMode(IntPtr hConsoleHandle, out uint lpMode);
+[DllImport("kernel32.dll", SetLastError = true)] public static extern bool SetConsoleMode(IntPtr hConsoleHandle, uint dwMode);
+'@
+        }
+        $h = [DfirNative.Con]::GetStdHandle(-10)    # STD_INPUT_HANDLE
+        $mode = [uint32]0
+        if (-not [DfirNative.Con]::GetConsoleMode($h, [ref]$mode)) { return $false }   # no console (ISE, redirected input)
+        if (-not ($mode -band 0x40)) { return $false }                                 # ENABLE_QUICK_EDIT_MODE already off
+        $new = ($mode -band (-bnot [uint32]0x40)) -bor 0x80                           # clear QuickEdit; ENABLE_EXTENDED_FLAGS makes it stick
+        if (-not [DfirNative.Con]::SetConsoleMode($h, [uint32]$new)) { return $false }
+        $script:SavedConsoleMode = $mode
+        return $true
+    } catch { return $false }
+}
+function Restore-QuickEdit {
+    if ($null -eq $script:SavedConsoleMode) { return }
+    try { [void][DfirNative.Con]::SetConsoleMode([DfirNative.Con]::GetStdHandle(-10), [uint32]$script:SavedConsoleMode) } catch { }
+    $script:SavedConsoleMode = $null
 }
 
 function Test-IsAdmin {
@@ -417,6 +447,7 @@ Start-Transcript -Path (Join-Path $CollectionRoot 'Collection.log') -Force | Out
 
 Write-Log "Collect_v3 $ScriptVersion | Case=$CaseId | Operator=$Operator | Host=$HostName | Profile=$CollectionProfile"
 Write-Log "Output: $CollectionRoot"
+if (Disable-QuickEdit) { Write-Log 'Console QuickEdit turned off for this run (a click in the window can no longer pause collection); restored at the end' }
 foreach ($v in $AllVolumes) {
     $role = if ($v.Letter -eq ($env:SystemDrive).ToUpper()) { 'system drive' }
             elseif (@($ExtraVolumes | Where-Object { $_.Letter -eq $v.Letter }).Count) { 'EXTRA - will be collected' }
@@ -1380,7 +1411,11 @@ Add-Collector -Phase 4 -Level 2 -Name 'Kernel drivers: hashes, signers, loaded m
     if ($LolDriversCsv) {
         $lol = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
         foreach ($m in [regex]::Matches([IO.File]::ReadAllText($LolDriversCsv), '\b(?:[0-9a-fA-F]{64}|[0-9a-fA-F]{40}|[0-9a-fA-F]{32})\b')) { [void]$lol.Add($m.Value) }
+        # An empty hash set would look exactly like a clean host, so say how many were loaded, and fail loudly on none.
+        if ($lol.Count) { Write-Log ('    LOLDrivers list: {0} unique hashes loaded from {1}' -f $lol.Count, (Split-Path -Leaf $LolDriversCsv)) }
+        else { Write-Error "-LolDriversCsv $LolDriversCsv contains no MD5/SHA-1/SHA-256 hashes; drivers were not matched" }
     }
+    $lolHits = 0
     $rows = @{}   # key: normalized lower-case path
     foreach ($d in @(Get-CimInstance Win32_SystemDriver -ErrorAction SilentlyContinue)) {
         $path = ConvertTo-DriverPath $d.PathName
@@ -1407,6 +1442,7 @@ Add-Collector -Phase 4 -Level 2 -Name 'Kernel drivers: hashes, signers, loaded m
         $md5 = if ($fi) { Get-HashSafe $fi.FullName 'MD5' } else { $null }
         $match = $null
         if ($lol) { $match = @($sha256, $sha1, $md5 | Where-Object { $_ -and $lol.Contains($_) }) -join ' ' }
+        if ($match) { $lolHits++ }
         # Most loaded-without-service modules are Windows library/core images or in-memory crash-dump copies.
         # 'review' = loaded with no service entry AND not signed as part of Windows (or a LOLDrivers hit).
         $triage = if ($match) { 'review: LOLDrivers match' }
@@ -1430,6 +1466,7 @@ Add-Collector -Phase 4 -Level 2 -Name 'Kernel drivers: hashes, signers, loaded m
             LolDriversMatch = $(if ($null -eq $lol) { 'not checked' } elseif ($match) { $match } else { '' })
         }
     }
+    if ($lol -and $lol.Count) { Write-Log ('    LOLDrivers matches: {0}' -f $lolHits) $(if ($lolHits) { 'WARN' } else { 'INFO' }) }
     if (-not $loaded.Count) { Write-Warning 'EnumDeviceDrivers returned nothing (needs admin); loaded-module columns are incomplete.' }
 }
 
@@ -2351,6 +2388,9 @@ Add-Collector -Phase 7 -Level 3 -Name 'Parse: SQLECmd (browser and app SQLite da
     New-Item -ItemType Directory -Force -Path $workMaps | Out-Null
     try {
         Get-ChildItem -LiteralPath $Tool.SQLECmd.DirectoryName -File | Copy-Item -Destination $work -Force
+        # Builds from 2026.10 load SQLite.Interop.dll from runtimes\<rid>\native next to the exe and exit without it.
+        $rt = Join-Path $Tool.SQLECmd.DirectoryName 'runtimes'
+        if (Test-Path -LiteralPath $rt) { Copy-Item -LiteralPath $rt -Destination $work -Recurse -Force }
         $maps = foreach ($m in Get-ChildItem -LiteralPath (Join-Path $Tool.SQLECmd.DirectoryName 'Maps') -Filter '*.smap' -File -ErrorAction Ignore) {
             $id = Select-String -LiteralPath $m.FullName -Pattern '^Id:\s*(\S+)' | Select-Object -First 1
             [pscustomobject]@{ Id = $(if ($id) { $id.Matches[0].Groups[1].Value } else { $m.Name }); File = $m }
@@ -2478,15 +2518,18 @@ Add-Collector -Phase 8 -Level 4 -Name 'Velociraptor offline collection' -Format 
 $plan = @($script:Registry | Where-Object { $_.Level -le $Ctx.Level } | Sort-Object Phase, Seq)
 Write-Log ("Executing {0} collectors for profile '{1}'" -f $plan.Count, $CollectionProfile)
 
+$collectorsDone = $false
 try {
     foreach ($c in $plan) {
         # KAPE/Velociraptor read the live volume; drop our snapshot first so KAPE --vss does not collect it twice.
         if ($c.Phase -ge 8 -and $Ctx.ShadowLink) { Remove-Vss }
         Invoke-Collector $c
     }
+    $collectorsDone = $true
 }
 finally {
     Remove-Vss    # always remove the snapshot + symlink, even on Ctrl+C
+    if (-not $collectorsDone) { Restore-QuickEdit }   # aborted: give the operator their console back now
 }
 
 $EndUtc = [DateTime]::UtcNow
@@ -2685,3 +2728,4 @@ Write-Host "Results       : $($counts -join ', ')"
 Write-Host "FileHashes.csv SHA256 (record this off-box): $hashOfHashes"
 if ($archivePath) { Write-Host "Archive       : $archivePath" }
 Write-Host ''
+Restore-QuickEdit

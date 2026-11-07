@@ -2,7 +2,7 @@
 
 A single PowerShell script that collects forensic evidence from a live Windows machine, in order of volatility. It drives the standard free DFIR toolset (Sysinternals, Eric Zimmerman's tools, KAPE, Velociraptor, WinPmem / Magnet RAM Capture / DumpIt, RawCopy) and writes a hashed, self-documenting collection: a manifest, per-step results, and SHA-256 hashes of every file.
 
-![PowerShell 5.1](https://img.shields.io/badge/PowerShell-5.1-blue) ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011%20%7C%20Server-informational) ![Version](https://img.shields.io/badge/version-3.4.1-green) ![License: MIT](https://img.shields.io/badge/license-MIT-yellow)
+![PowerShell 5.1](https://img.shields.io/badge/PowerShell-5.1-blue) ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011%20%7C%20Server-informational) ![Version](https://img.shields.io/badge/version-3.4.2-green) ![License: MIT](https://img.shields.io/badge/license-MIT-yellow)
 
 > 🛡️ **A blue-team tool** for incident responders, forensic analysts and researchers. Use it only on systems you own or are authorized to examine. See [Purpose and responsible use](#purpose-and-responsible-use).
 
@@ -72,6 +72,8 @@ Opt-in extras: `-YaraRules <file.yar>` (process-memory YARA scan, Full), `-LolDr
 
 The collection is designed to be opened with **Timeline Explorer** and the other Zimmerman GUI tools, **Volatility 3** / **MemProcFS** for memory, and a **Velociraptor** server for the Velociraptor zips. See section 7 of the [user guide](docs/USER_GUIDE.md).
 
+**bulk_extractor** makes a good second pass over the raw files: point it at the memory image and the pagefile (not the whole case folder) to carve URLs, domains, emails, IPs and packet fragments that Volatility's plugins don't parse. Section 10 of the user guide explains where to point it, what to read first, and how it fits with Volatility.
+
 ## Purpose and responsible use
 
 Collect_v3 is built **for defenders**: incident responders, forensic examiners, SOC analysts, students and researchers who need a fast, repeatable and well-documented way to preserve evidence from a Windows machine before it changes or disappears.
@@ -105,7 +107,7 @@ This project stands on the shoulders of the people who build and maintain the fr
 | **RawCopy** | **Joakim Schicht** | Copying locked NTFS files (`$MFT`, `$LogFile`, pagefile, hiberfil) | https://github.com/jschicht/RawCopy |
 | **7-Zip** | **Igor Pavlov** | Optional encrypted archive of the collection | https://www.7-zip.org |
 
-The user guide also recommends these analysis tools, credited to their authors: **Volatility 3** (The Volatility Foundation), **MemProcFS** (Ulf Frisk), **Hayabusa** (Yamato Security), **Chainsaw** (WithSecure), and **DB Browser for SQLite** (the sqlitebrowser project). Thanks also to **AboutDFIR** (aboutdfir.com) for its Timeline Explorer guide, which section 9 of the user guide draws on.
+The user guide also recommends these analysis tools, credited to their authors: **Volatility 3** (The Volatility Foundation), **MemProcFS** (Ulf Frisk), **Hayabusa** (Yamato Security), **Chainsaw** (WithSecure), **bulk_extractor** (Simson Garfinkel), and **DB Browser for SQLite** (the sqlitebrowser project). Thanks also to **AboutDFIR** (aboutdfir.com) for its Timeline Explorer guide, which section 9 of the user guide draws on.
 
 All product names and trademarks belong to their respective owners. Their mention here doesn't imply endorsement of this project.
 
