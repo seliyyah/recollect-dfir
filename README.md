@@ -70,7 +70,7 @@ Opt-in extras: `-YaraRules <file.yar>` (process-memory YARA scan, Full), `-LolDr
 
 ## Analysis tools
 
-The collection is designed to be opened with **Timeline Explorer** and the other Zimmerman GUI tools, **Volatility 3** / **MemProcFS** for memory, and a **Velociraptor** server for the Velociraptor zips. See section 7 of the [user guide](docs/USER_GUIDE.md).
+The collection is designed to be opened with **Timeline Explorer** and the other Zimmerman GUI tools, **Volatility 3** / **MemProcFS** for memory, and a **Velociraptor** server for the Velociraptor zips. Section 7 of the [user guide](docs/USER_GUIDE.md) opens with a quick-reference table of which tool to use for each output folder, including the less common outputs: WMI repository, WebCache, thumbcache, Notepad tabs and Defender quarantine. Section 2.4 lists where to get each tool.
 
 **bulk_extractor** makes a good second pass over the raw files: point it at the memory image and the pagefile (not the whole case folder) to carve URLs, domains, emails, IPs and packet fragments that Volatility's plugins don't parse. Section 10 of the user guide explains where to point it, what to read first, and how it fits with Volatility. Its feature files are often too large for Notepad or Excel; the companion script [bulk-extractor-to-csv](https://github.com/seliyyah/bulk-extractor-to-csv) converts them to CSV for Timeline Explorer.
 
@@ -107,7 +107,7 @@ This project stands on the shoulders of the people who build and maintain the fr
 | **RawCopy** | **Joakim Schicht** | Copying locked NTFS files (`$MFT`, `$LogFile`, pagefile, hiberfil) | https://github.com/jschicht/RawCopy |
 | **7-Zip** | **Igor Pavlov** | Optional encrypted archive of the collection | https://www.7-zip.org |
 
-The user guide also recommends these analysis tools, credited to their authors: **Volatility 3** (The Volatility Foundation), **MemProcFS** (Ulf Frisk), **Hayabusa** (Yamato Security), **Chainsaw** (WithSecure), **bulk_extractor** (Simson Garfinkel), and **DB Browser for SQLite** (the sqlitebrowser project). Thanks also to **AboutDFIR** (aboutdfir.com) for its Timeline Explorer guide, which section 9 of the user guide draws on.
+The user guide also recommends these analysis tools, credited to their authors: **Volatility 3** (The Volatility Foundation), **MemProcFS** (Ulf Frisk), **Hayabusa** (Yamato Security), **Chainsaw** (WithSecure), **bulk_extractor** (Simson Garfinkel), **DB Browser for SQLite** (the sqlitebrowser project), **Wireshark** (the Wireshark project), **klogg** (the klogg project), **Thumbcache Viewer** (Eric Kutcher), **BrowsingHistoryView** and **ESEDatabaseView** (Nir Sofer, NirSoft), **PyWMIPersistenceFinder** (David Pany), **notepad_parser** (AbdulRhman Alfaifi), **maldump** (NÚKIB) and **defender-dump** (knez). Thanks also to **AboutDFIR** (aboutdfir.com) for its Timeline Explorer guide, which section 9 of the user guide draws on.
 
 All product names and trademarks belong to their respective owners. Their mention here doesn't imply endorsement of this project.
 

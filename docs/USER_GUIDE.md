@@ -113,6 +113,15 @@ The script finds each tool by its **file name**, searching every folder under `T
 | DB Browser for SQLite | Browsing browser and app databases by hand |
 | Hayabusa or Chainsaw (optional) | Quick Sigma-rule hunting across `EventLogs\All\*.evtx` |
 | bulk_extractor (optional) | Carving URLs, domains, emails, IPs and packets from the memory image and pagefile. See section 10 |
+| bulk-extractor-to-csv (optional; [github.com/seliyyah/bulk-extractor-to-csv](https://github.com/seliyyah/bulk-extractor-to-csv)) | Converting bulk_extractor output to CSV for Timeline Explorer |
+| Velociraptor (the same `velociraptor.exe` as in the toolkit) | Running a local server to import the `Velociraptor\` zips. See 7.12 |
+| Wireshark ([wireshark.org](https://www.wireshark.org)) | bulk_extractor's `packets.pcap` |
+| Notepad++ and klogg ([github.com/variar/klogg](https://github.com/variar/klogg)) | Text output; klogg opens multi-GB text files that other editors can't |
+| Thumbcache Viewer ([thumbcacheviewer.github.io](https://thumbcacheviewer.github.io)) | `thumbcache_*.db` thumbnails |
+| NirSoft BrowsingHistoryView and ESEDatabaseView ([nirsoft.net](https://www.nirsoft.net)) | The legacy IE/Edge `WebCacheV01.dat` ESE database |
+| PyWMIPersistenceFinder ([github.com/davidpany/WMI_Forensics](https://github.com/davidpany/WMI_Forensics); Python) | WMI consumers in the collected `OBJECTS.DATA` |
+| notepad_parser ([github.com/AbdulRhmanAlfaifi/notepad_parser](https://github.com/AbdulRhmanAlfaifi/notepad_parser)) | Unsaved Windows 11 Notepad tabs (`TabState\`) |
+| maldump ([github.com/NUKIB/maldump](https://github.com/NUKIB/maldump)) or defender-dump ([github.com/knez/defender-dump](https://github.com/knez/defender-dump)) | Decoding `Security\DefenderQuarantine\`. ⚠ **Only in an isolated malware-analysis VM:** the output is live malware |
 
 ---
 
@@ -227,6 +236,34 @@ For each extra internal drive: Deep collects the raw `$MFT`, `$LogFile` and `$Bo
 
 Every run creates `Collections\<CaseId>_<COMPUTER>_<yyyyMMddTHHmmssZ>\`, for example `IR-001_WORKSTATION01_20261105T024807Z`. Empty folders are deleted at the end, so a Quick run has fewer folders.
 
+### Quick reference: which tool opens which output
+
+Do all analysis on your workstation, never on the suspect machine. The sections in the last column have the details. Where to get each tool is in section 2.4.
+
+| Output | Start with | Then, for depth | Section |
+|---|---|---|---|
+| `CollectorResults.csv`, `manifest.txt`, `Collection.log` | Timeline Explorer (CSV), any text editor | | 7.0 |
+| `Memory\*.raw` | **Volatility 3** | **MemProcFS**; **bulk_extractor**, then **bulk-extractor-to-csv** to read its output | 7.1, 10 |
+| `System\`, `Network\`, `Processes\`, `Persistence\`, `Security\` | Timeline Explorer for the CSVs; a text editor (Notepad++) for the TXT files | Hash, IP and domain lookups (see the note below the table) | 7.2–7.6 |
+| `Security\DefenderQuarantine\` | **Only in an isolated malware-analysis VM:** **maldump** or **defender-dump** to decode the samples | Your usual malware-analysis tools | 7.6 |
+| `EventLogs\All\` | `Parsed\EvtxECmd\evtx_all.csv` in Timeline Explorer | **Hayabusa** or **Chainsaw** for Sigma-rule hunting; Event Viewer for a single log | 7.7 |
+| `Disk\...\config\`, `NTUSER.DAT`, `UsrClass.dat` | `Parsed\RECmd_*`, `Parsed\SBECmd` | **Registry Explorer**, **ShellBags Explorer** | 7.8, 7.10 |
+| `Disk\NTFS\` | `Parsed\MFTECmd` | **MFTExplorer**; `KAPE\Modules\...\MFTECmd_$J_Output.csv` for the USN journal in UTC | 7.8, 7.11 |
+| Prefetch, Amcache, ShimCache, LNK, Jump Lists, SRUM, Timeline, Recycle Bin | The matching `Parsed\` folder in Timeline Explorer | **JumpList Explorer**, **EZViewer** | 7.10 |
+| Browser databases | `Parsed\SQLECmd` (⚠ local time) | **DB Browser for SQLite**; the Velociraptor browser artifacts (UTC) | 7.13 |
+| `WebCache\` (ESE database) | NirSoft **BrowsingHistoryView** | NirSoft **ESEDatabaseView** for every table | 7.8 |
+| `thumbcache_*.db` | **Thumbcache Viewer** | | 7.8 |
+| `wbem\Repository\` | `Persistence\wmi_subscriptions.txt` and Velociraptor's `PermanentWMIEvents` | **PyWMIPersistenceFinder** on `OBJECTS.DATA`, for consumers no longer registered | 7.5, 7.8 |
+| Notepad `TabState\` (Deep+) | **notepad_parser** | A hex editor | 7.8 |
+| `SystemFiles\hiberfil_C.sys` | Comae **Hibr2Bin** (in the toolkit), then Volatility 3 | bulk_extractor on the converted file | 7.8, 10 |
+| `SystemFiles\pagefile_C.sys` | **bulk_extractor** | MemProcFS (load it beside the memory image); YARA | 7.8, 10 |
+| `Tools\` (Sysinternals) | Timeline Explorer (`autoruns.csv`, `sigcheck_*.csv`), a text editor for the rest | | 7.9 |
+| `KAPE\` | `Modules\` CSVs in Timeline Explorer | The Zimmerman GUI tools on `Targets\` | 7.11 |
+| `Velociraptor\*.zip` | A local **Velociraptor** server (`velociraptor.exe gui`) with `Server.Utils.ImportCollection` | The JSON inside each zip | 7.12 |
+| bulk_extractor output | **bulk-extractor-to-csv**, then Timeline Explorer | **klogg** for huge text files; **Wireshark** for `packets.pcap` | 10 |
+
+**Hash, IP and domain lookups:** look up SHA-256 or SHA-1 values, IP addresses and domains on VirusTotal, AbuseIPDB or your own threat-intelligence platform. **Search by hash; don't upload files from a case.** Files uploaded to public services are shared with other users and researchers, and an attacker watching for their own malware will see that it has been found.
+
 ### 7.0 Files at the top level (read these first)
 
 | File | Contents | How to use it |
@@ -321,7 +358,7 @@ Every run creates `Collections\<CaseId>_<COMPUTER>_<yyyyMMddTHHmmssZ>\`, for exa
 | `wfp_filters.xml`, `wfp_block_summary.csv` | All **Windows Filtering Platform** filters, which `firewall.txt` doesn't show. The summary lists **BLOCK filters keyed on an application path**, the pattern EDRSilencer-style tools use to cut an EDR off from its cloud. Any block on `MsMpEng.exe`, `MsSense.exe` or another security product's process is a strong red flag. `wfp_state.xml` (Deep+) is the full WFP state and can be tens of MB. |
 | `sysmon_config.txt` | Whether **Sysmon** is installed (found by version info, so a renamed copy is still detected) and its decoded configuration (`<sysmon> -c`, run only for a valid Microsoft-signed binary) plus the driver's registry parameters. Check what the config excludes. |
 | `exfil_tools.csv` (Deep+) | **Exfiltration and tunneling tools** (rclone, restic, MEGA, WinSCP, FileZilla, PuTTY tools, ngrok, cloudflared, chisel, Syncthing, S3 Browser, Cyberduck), matched by file name **and** by version info, so a renamed `rclone` is still found. Hash and signature. **Configs, presence only:** for `rclone.conf` only the remote names and types are recorded (or `encrypted`); `ngrok.yml`, `WinSCP.ini` and FileZilla's server lists are listed with hash, never copied (they hold credentials). |
-| `DefenderQuarantine\` (opt-in) | Only with `-DefenderQuarantine`: a copy of Defender's quarantine. ⚠ **Live malware samples** (RC4-obfuscated with a well-known key, not directly runnable). Handle and store as malware. |
+| `DefenderQuarantine\` (opt-in) | Only with `-DefenderQuarantine`: a copy of Defender's quarantine. ⚠ **Live malware samples** (RC4-obfuscated with a well-known key, not directly runnable). Handle and store as malware. To decode the samples, run **maldump** or **defender-dump** in an isolated malware-analysis VM, never on your everyday workstation. |
 
 ### 7.7 `EventLogs\`
 
@@ -331,7 +368,7 @@ Every run creates `Collections\<CaseId>_<COMPUTER>_<yyyyMMddTHHmmssZ>\`, for exa
 | `Live\` | Live exports of Security, System, Application, PowerShell and Sysmon (a backup copy) |
 | `channel_config.csv` (all profiles) | Every event log channel: enabled or not, retention mode, **maximum size**, current size, record count, whether it's full, oldest record, last write. **A disabled channel, or a Security log shrunk to a tiny maximum size, is evidence of anti-forensics** even when the log itself looks clean. |
 
-**How to analyze:** Start with the parsed version, `Parsed\EvtxECmd\evtx_all.csv`, in **Timeline Explorer** (section 7.10). For a single log, double-click the `.evtx` to open it in Windows Event Viewer. For fast threat hunting, run **Hayabusa** or **Chainsaw** against the `All\` folder.
+**How to analyze:** Start with the parsed version, `Parsed\EvtxECmd\evtx_all.csv`, in **Timeline Explorer** (section 7.10). For a single log, double-click the `.evtx` to open it in Windows Event Viewer. For fast threat hunting, run **Hayabusa** or **Chainsaw** against the `All\` folder, for example `hayabusa csv-timeline -d "<case folder>\EventLogs\All" -o hayabusa_timeline.csv`, and open the result in Timeline Explorer.
 
 **Key event IDs:**
 
@@ -362,12 +399,12 @@ The folder tree **mirrors the original paths** (`Disk\Windows\...` = `C:\Windows
 | `Windows\Prefetch\` | `.pf` files: what ran, how often, the last 8 run times | Parsed in `Parsed\PECmd` |
 | `Windows\System32\Tasks\` | Scheduled-task XML (including deleted-but-still-present files) | Text editor |
 | `Windows\System32\sru\` | SRUM database: per-app network bytes and resource use for about 30 days | Parsed in `Parsed\SrumECmd` |
-| `Windows\System32\wbem\Repository\` | WMI repository (WMI persistence) | Specialist WMI parsers |
+| `Windows\System32\wbem\Repository\` | WMI repository (WMI persistence) | **PyWMIPersistenceFinder** on `OBJECTS.DATA`; it can find consumers that are no longer registered. Compare with `Persistence\wmi_subscriptions.txt` |
 | `Users\...\Recent\`, `...\AutomaticDestinations` | LNK files and Jump Lists: files and folders the user opened, including on USB and network drives | Parsed in `Parsed\LECmd`, `JLECmd`; JumpList Explorer |
 | `Users\...\ConnectedDevicesPlatform\` | ActivitiesCache.db (Windows Timeline) | Parsed in `Parsed\WxTCmd` |
 | `Users\...\Google\Chrome\...`, `...\Edge\...`, Firefox | Browser history, downloads, sessions, extensions | Parsed in `Parsed\SQLECmd`; DB Browser for SQLite |
 | `Users\...\Explorer\thumbcache_*.db` | Thumbnails of pictures and videos viewed, even after deletion | Thumbcache Viewer |
-| `Users\...\WebCache\` | IE/Edge legacy cache and history (ESE database) | NirSoft or ESE database viewers |
+| `Users\...\WebCache\` | IE/Edge legacy cache and history (ESE database) | NirSoft **BrowsingHistoryView** (history) or **ESEDatabaseView** (every table) |
 | `ProgramData\Microsoft\Windows\WER\` | Crash reports (can show malware crashes) | Text editor |
 | `$Recycle.Bin\` | Deleted files: `$I` = metadata, `$R` = content (content only in Full) | Parsed in `Parsed\RBCmd` |
 | `NTFS\MFT_C.bin`, `LogFile_C.bin`, `Boot_C.bin` | Raw NTFS metadata: **every file** on the drive with its timestamps | Parsed in `Parsed\MFTECmd`; MFTExplorer |
@@ -381,7 +418,7 @@ The folder tree **mirrors the original paths** (`Disk\Windows\...` = `C:\Windows
 | `remote_access_presence.csv` (Deep+) | Remote-access / RMM tool configs and files **recorded but not copied** (presence, size, UTC times, SHA-256): ScreenConnect `User.xml` and client `user.config`, files pushed through ScreenConnect (`Temp\ScreenConnect\<ver>\Files\`), Atera configs, AnyDesk `*.conf`, NetSupport `client32.ini` (only `GatewayAddress` / port are read out: the C2 or gateway address), MeshAgent `.msh` (only the server URL), and configs next to any MeshAgent, NetSupport, SimpleHelp, Action1 or ScreenConnect service. | Timeline Explorer |
 | `Program Files\ScreenConnect\`, `...\ATERA Networks\`, `ProgramData\LogMeIn\` (Deep+) | Remote-access logs: ScreenConnect `Session.db`, Atera and LogMeIn logs, and `*.log` / `*.txt` next to discovered RMM services. Paths follow KAPE's `RemoteAdmin` targets. | Text editor; DB Browser for SQLite |
 | `iis_webroot_listing.csv`, `Windows\System32\inetsrv\config\` (Deep+, IIS only) | `applicationHost.config` (lists **native and managed modules**: malicious IIS modules are a known backdoor), every file in every site root with SHA-256 for script and binary types (`.aspx .ashx .asmx .php .jsp .config .dll` …), and each site's `web.config`. Exchange servers have their own web-shell locations, which aren't covered. | Timeline Explorer: sort by `ModifiedUtc`, look for new scripts |
-| `Users\<u>\...\Microsoft.WindowsNotepad_*\LocalState\TabState\` and `...StickyNotes_*\plum.sqlite` (Deep+) | **Unsaved Notepad tabs** (Windows 11) and Sticky Notes. | No parser is bundled: use a community Notepad TabState parser; `plum.sqlite` opens in DB Browser for SQLite |
+| `Users\<u>\...\Microsoft.WindowsNotepad_*\LocalState\TabState\` and `...StickyNotes_*\plum.sqlite` (Deep+) | **Unsaved Notepad tabs** (Windows 11) and Sticky Notes. | No parser is bundled: use **notepad_parser** for `TabState\`; `plum.sqlite` opens in DB Browser for SQLite |
 | `Users\<u>\AppData\Local\Mega Limited\MEGAsync\logs\` (Deep+) | MEGAsync logs (exfiltration to MEGA). Logs only, no credentials. | Text editor |
 | `_CopyLog.csv` | Every file copied from the shadow copy, with original timestamps (UTC) | Proof of where each file came from |
 
