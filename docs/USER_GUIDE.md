@@ -614,6 +614,7 @@ Run it **afterwards, on your analysis workstation, against a copy** of the colle
 
 - **Start with the histograms:** `domain_histogram.txt`, `url_histogram.txt` and `email_histogram.txt`, ranked by count. Rare entries near the bottom are often more interesting than the top ones, which are usually Microsoft, Google and CDN domains.
 - **Then open the matching feature files** (`domain.txt`, `url.txt`, `email.txt`, `ip.txt`). Each hit has its **byte offset** in the image and a little surrounding context, which you use to tie it back to a process (see 10.3).
+- **Large files:** feature files such as `domain.txt` and `url.txt` can run to millions of lines, too many for Notepad or Excel. [bulk-extractor-to-csv](https://github.com/seliyyah/bulk-extractor-to-csv) converts the whole output folder to CSV for Timeline Explorer, removes the `\000` padding from UTF-16 context, and its user guide covers quick `grep` and `Select-String` searches.
 - **Network output:** `packets.pcap` (open in Wireshark) and `ip.txt`. Expect fragments, not whole conversations.
 - **Time:** roughly 30–60 minutes for a 32 GB image, depending on the CPU. It uses every core.
 - **Handle the output as evidence.** It contains whatever was in memory, which can include session tokens, credentials in URLs and personal data.

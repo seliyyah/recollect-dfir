@@ -72,7 +72,7 @@ Opt-in extras: `-YaraRules <file.yar>` (process-memory YARA scan, Full), `-LolDr
 
 The collection is designed to be opened with **Timeline Explorer** and the other Zimmerman GUI tools, **Volatility 3** / **MemProcFS** for memory, and a **Velociraptor** server for the Velociraptor zips. See section 7 of the [user guide](docs/USER_GUIDE.md).
 
-**bulk_extractor** makes a good second pass over the raw files: point it at the memory image and the pagefile (not the whole case folder) to carve URLs, domains, emails, IPs and packet fragments that Volatility's plugins don't parse. Section 10 of the user guide explains where to point it, what to read first, and how it fits with Volatility.
+**bulk_extractor** makes a good second pass over the raw files: point it at the memory image and the pagefile (not the whole case folder) to carve URLs, domains, emails, IPs and packet fragments that Volatility's plugins don't parse. Section 10 of the user guide explains where to point it, what to read first, and how it fits with Volatility. Its feature files are often too large for Notepad or Excel; the companion script [bulk-extractor-to-csv](https://github.com/seliyyah/bulk-extractor-to-csv) converts them to CSV for Timeline Explorer.
 
 ## Purpose and responsible use
 
