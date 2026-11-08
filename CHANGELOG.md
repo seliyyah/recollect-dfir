@@ -2,6 +2,15 @@
 
 All notable changes to `Collect_v3.ps1`. Format based on [Keep a Changelog](https://keepachangelog.com/); versions follow [Semantic Versioning](https://semver.org/).
 
+## [3.5.0]
+
+### Added
+- **`ANALYSIS_README.txt` guidance files.** At the end of a run, the collection root, each top-level output folder and each artifact folder under `Disk\` get a short plain-text file: what the files are (for example, that the `.sys` files in `Disk\SystemFiles` are the pagefile, hibernation file and swapfile, not drivers, or that the `.log` files in the BITS `Downloader` folder are database transaction files, not text logs), why they matter, how to analyze them, and links to the tools' official pages and to the user guide. 60 entries cover every folder the script can produce. They're aimed at new analysts, researchers and students who open a folder without the guide. Only folders that exist and aren't empty get a file; an existing file of the same name is never overwritten; the files are written before hashing, so they're in `FileHashes.csv`. Collect_v3 doesn't run or include any of the tools named.
+- `-NoAnalysisReadme` skips them.
+
+### Verified
+- Against an empty copy of a real Full collection's folder tree plus the folders that collection didn't have: 69 files written, every entry matched, every tool named has a link, a second run changed nothing. Not yet verified in a live collection run.
+
 ## [3.4.2]
 
 Fixes and verification from an elevated Full + Memory run with `-YaraRules`, `-LolDriversCsv` and `-VelociraptorArtifactArgs` on the lab laptop (104 OK, 1 WARN, 5 expected SKIPs, no FAILs; the WARN is fixed below).

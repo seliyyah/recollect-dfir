@@ -2,7 +2,7 @@
 
 A single PowerShell script that collects forensic evidence from a live Windows machine, in order of volatility. It drives the standard free DFIR toolset (Sysinternals, Eric Zimmerman's tools, KAPE, Velociraptor, WinPmem / Magnet RAM Capture / DumpIt, RawCopy) and writes a hashed, self-documenting collection: a manifest, per-step results, and SHA-256 hashes of every file.
 
-![PowerShell 5.1](https://img.shields.io/badge/PowerShell-5.1-blue) ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011%20%7C%20Server-informational) ![Version](https://img.shields.io/badge/version-3.4.2-green) ![License: MIT](https://img.shields.io/badge/license-MIT-yellow)
+![PowerShell 5.1](https://img.shields.io/badge/PowerShell-5.1-blue) ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011%20%7C%20Server-informational) ![Version](https://img.shields.io/badge/version-3.5.0-green) ![License: MIT](https://img.shields.io/badge/license-MIT-yellow)
 
 > 🛡️ **A blue-team tool** for incident responders, forensic analysts and researchers. Use it only on systems you own or are authorized to examine. See [Purpose and responsible use](#purpose-and-responsible-use).
 
@@ -43,6 +43,7 @@ Opt-in extras: `-YaraRules <file.yar>` (process-memory YARA scan, Full), `-LolDr
 - **Drive-letter independent:** finds its tools relative to its own location, collects whatever drive Windows is on, and auto-detects extra **internal** disks (USB and virtual disks are excluded).
 - **Tamper and BYOVD awareness:** records whether logging was interfered with (disabled or shrunk event-log channels, stopped ETW/AutoLogger sessions, WFP filters blocking security tools) and hashes every driver, including ones loaded with no service entry, ready for LOLDrivers matching.
 - **No credentials:** configs that can hold secrets (rclone, ngrok, WinSCP, FileZilla, RMM agents, AnyDesk) are recorded as presence and hash only; SSH private keys, cookies, saved passwords and autofill are never collected.
+- **Self-explaining output:** every output folder, and every artifact folder under `Disk\`, gets an `ANALYSIS_README.txt`: what the files are, why they matter, how to analyze them, and links to the tools' official pages. Written for new analysts, researchers and students; `-NoAnalysisReadme` turns it off.
 - **Smart tool handling:** finds tools by file name anywhere under `Tools\`; picks the runnable build (skips .NET builds whose runtime is missing and falls back to KAPE's bundled copies; prefers x64 over x86 and ARM64).
 
 ## Requirements

@@ -86,6 +86,7 @@ Only on a lab VM or a dedicated test machine. Snapshot the VM first.
 | Extra-internal-volume collection | **Unverified**: no test machine with a second internal disk yet |
 | `-Archive -ArchivePassword` / 7-Zip 23.01 | Verified (Standard run: 1,088 files, 782 MB → 58 MB; listing without the password fails, so headers are encrypted; `.sha256` matches). The password has to be passed with `-Command`, since a SecureString can't pass through `-File`. |
 | `-NtpServer` | **Unverified** |
+| `ANALYSIS_README.txt` writer (3.5.0) | Verified on a skeleton of a real Full collection's folder tree (69 files, all 60 entries matched, idempotent). **Unverified in a live run.** |
 
 ### 3.4.0 additions
 

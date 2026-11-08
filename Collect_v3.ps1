@@ -57,9 +57,12 @@
 .PARAMETER Archive            Archive the collection when done (7-Zip if present, else Compress-Archive).
 .PARAMETER ArchivePassword    SecureString; encrypts the 7-Zip archive (AES-256, headers encrypted).
                               NOTE: 7-Zip receives the password on its command line (visible to local admins).
+.PARAMETER NoAnalysisReadme   Don't write ANALYSIS_README.txt files. By default each output folder (and each artifact
+                              folder under Disk\) gets a short text file: what the files are, why they matter, how to
+                              analyze them and links to the tools' official pages. Collect_v3 runs none of those tools.
 
 .NOTES
-    Version : 3.4.2
+    Version : 3.5.0
     Tested  : syntax-targeted at Windows PowerShell 5.1 (the common endpoint default).
     VERIFY  : Command-line syntax for third-party tools (memory imagers, RawCopy, Zimmerman tools,
               KAPE, Velociraptor) changes between versions. Test each against the exact versions
@@ -107,14 +110,15 @@ param(
     [string]$LolDriversCsv,                       # optional: local LOLDrivers CSV/JSON export for hash matching
     [switch]$DefenderQuarantine,                  # opt-in: copy Defender quarantine (live malware samples)
     [switch]$Archive,
-    [securestring]$ArchivePassword
+    [securestring]$ArchivePassword,
+    [switch]$NoAnalysisReadme                     # skip the ANALYSIS_README.txt guidance files
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Continue'
 $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
 
-$ScriptVersion  = '3.4.2'
+$ScriptVersion  = '3.5.0'
 $ScriptStartUtc = [DateTime]::UtcNow
 $Inv            = [Globalization.CultureInfo]::InvariantCulture
 
@@ -2657,6 +2661,1241 @@ $counts = $script:Results | Group-Object Status | ForEach-Object { '{0}={1}' -f 
 Get-ChildItem -LiteralPath $CollectionRoot -Directory -ErrorAction Ignore |
     Where-Object { -not (Get-ChildItem -LiteralPath $_.FullName -Force -ErrorAction Ignore) } |
     Remove-Item -Force -ErrorAction Ignore
+
+# ===================================================================
+# ANALYSIS READMES (-NoAnalysisReadme skips this)
+# ===================================================================
+# One ANALYSIS_README.txt per output folder and per artifact folder under Disk\: what the files
+# are, why they matter, how to analyze them, and the tools' official pages. Written after the
+# tidy (so empty folders are already gone) and before hashing (so the files are in
+# FileHashes.csv). Only folders that exist and are not empty get one; an existing file of the
+# same name is never overwritten. Paths are relative to the collection root; '*' matches one
+# folder level (a user name, a browser profile, 'Program Files*').
+
+$ReadmeGuideUrl = 'https://github.com/seliyyah/windows-dfir-collector/blob/main/docs/USER_GUIDE.md'
+$ReadmeEz = 'https://ericzimmerman.github.io/'
+$ReadmeTools = [ordered]@{
+    'Timeline Explorer'          = $ReadmeEz
+    'Registry Explorer'          = $ReadmeEz
+    'RECmd'                      = $ReadmeEz
+    'MFTECmd'                    = $ReadmeEz
+    'MFTExplorer'                = $ReadmeEz
+    'PECmd'                      = $ReadmeEz
+    'AmcacheParser'              = $ReadmeEz
+    'EvtxECmd'                   = $ReadmeEz
+    'LECmd'                      = $ReadmeEz
+    'JLECmd'                     = $ReadmeEz
+    'JumpList Explorer'          = $ReadmeEz
+    'SBECmd'                     = $ReadmeEz
+    'ShellBags Explorer'         = $ReadmeEz
+    'SrumECmd'                   = $ReadmeEz
+    'SumECmd'                    = $ReadmeEz
+    'WxTCmd'                     = $ReadmeEz
+    'RBCmd'                      = $ReadmeEz
+    'SQLECmd'                    = $ReadmeEz
+    'Volatility 3'               = 'https://github.com/volatilityfoundation/volatility3'
+    'MemProcFS'                  = 'https://github.com/ufrisk/MemProcFS'
+    'bulk_extractor'             = 'https://github.com/simsong/bulk_extractor'
+    'bulk-extractor-to-csv'      = 'https://github.com/seliyyah/bulk-extractor-to-csv'
+    'Hibr2Bin'                   = 'Comae Toolkit; included in the Collect_v3 toolkit'
+    'Sysinternals'               = 'https://learn.microsoft.com/sysinternals/'
+    'YARA'                       = 'https://virustotal.github.io/yara/'
+    'Hayabusa'                   = 'https://github.com/Yamato-Security/hayabusa'
+    'Chainsaw'                   = 'https://github.com/WithSecureOpenSource/chainsaw'
+    'Event Viewer'               = 'built into Windows (eventvwr.msc)'
+    'WinDbg'                     = 'https://learn.microsoft.com/windows-hardware/drivers/debugger/'
+    'LGPO'                       = 'https://www.microsoft.com/download/details.aspx?id=55319 (Security Compliance Toolkit)'
+    'Velociraptor'               = 'https://docs.velociraptor.app/'
+    'KAPE'                       = 'https://www.kroll.com/kape'
+    'DB Browser for SQLite'      = 'https://sqlitebrowser.org/'
+    'Hindsight'                  = 'https://github.com/RyanDFIR/hindsight'
+    'dejsonlz4'                  = 'https://github.com/avih/dejsonlz4'
+    'ESEDatabaseView'            = 'https://www.nirsoft.net/utils/ese_database_view.html'
+    'BrowsingHistoryView'        = 'https://www.nirsoft.net/utils/browsing_history_view.html'
+    'Thumbcache Viewer'          = 'https://thumbcacheviewer.github.io/'
+    'BitsParser'                 = 'https://github.com/fireeye/BitsParser'
+    'SIDR'                       = 'https://github.com/strozfriedberg/sidr'
+    'OneDriveExplorer'           = 'https://github.com/Beercow/OneDriveExplorer'
+    'bmc-tools'                  = 'https://github.com/ANSSI-FR/bmc-tools'
+    'PyWMIPersistenceFinder'     = 'https://github.com/davidpany/WMI_Forensics'
+    'notepad_parser'             = 'https://github.com/AbdulRhmanAlfaifi/notepad_parser'
+    'maldump'                    = 'https://github.com/NUKIB/maldump'
+    'defender-dump'              = 'https://github.com/knez/defender-dump'
+    'DetectionHistory parser'    = 'https://github.com/jklepsercyber/defender-detectionhistory-parser'
+    'KStrike'                    = 'https://github.com/brimorlabs/KStrike'
+    'LogFileParser'              = 'https://github.com/jschicht/LogFileParser'
+    'LOLDrivers'                 = 'https://www.loldrivers.io/'
+    'VirusTotal'                 = 'https://www.virustotal.com/ (search by hash; do not upload case files)'
+    'AbuseIPDB'                  = 'https://www.abuseipdb.com/'
+    'Notepad++'                  = 'https://notepad-plus-plus.org/'
+    'klogg'                      = 'https://github.com/variar/klogg'
+}
+
+$AnalysisReadmes = @(
+@{ Paths = @('.'); Guide = '7.0 and the quick reference at the start of section 7'
+   Tools = @('Timeline Explorer', 'Volatility 3', 'VirusTotal'); Text = @'
+WHAT IS HERE
+  The files at this level describe the collection itself. Each folder holds one kind of
+  evidence and has its own ANALYSIS_README.txt. Which folders exist depends on the profile.
+
+  CollectorResults.csv   One row per step: Status (OK / WARN / FAIL / SKIPPED), seconds,
+                         rows and a note. Open this first.
+  manifest.txt / .json   Chain of custody: script version and SHA-256, parameters, case,
+                         host, OS, start and end time (UTC), time zone, shadow copy.
+  FileHashes.csv         SHA-256 of every collected file. Re-check one with
+                         Get-FileHash <file> -Algorithm SHA256.
+  ToolInventory.csv      Every tool binary used, with version, hash and signature.
+  Collection.log         The full console transcript. Search it for WARN and ERROR.
+
+  Memory\       RAM image                  EventLogs\     every event log (.evtx)
+  System\       host facts, drivers, USB   Disk\          raw artifacts from a shadow copy
+  Network\      connections, DNS, SMB      Parsed\        Zimmerman tool CSVs
+  Processes\    running processes          Tools\         Sysinternals output
+  Persistence\  auto-start locations       KAPE\          KAPE triage (Full)
+  Security\     defenses and tampering     Velociraptor\  Velociraptor collections (Full)
+
+WHERE TO START
+  1. CollectorResults.csv: filter Status is not OK and read the Note column.
+  2. Parsed\ in Timeline Explorer: program execution, file activity and event logs as tables.
+  3. Memory\ with Volatility 3 or MemProcFS.
+  4. Follow every lead (a file name, an IP, a user) into the other folders.
+
+HANDLING
+  This folder is evidence. Work on a copy and keep FileHashes.csv with it. Look up hashes,
+  IP addresses and domains on public services; don't upload files from the case.
+'@ }
+
+@{ Paths = @('Memory'); Guide = '7.1 and 10'
+   Tools = @('Volatility 3', 'MemProcFS', 'bulk_extractor', 'bulk-extractor-to-csv'); Text = @'
+WHAT IS HERE
+  <COMPUTER>_<time>.raw  A full image of physical memory (about the size of the installed RAM).
+  acquisition.log        Output of the memory acquisition tool.
+
+WHY IT MATTERS
+  Memory holds what the disk doesn't: running and recently exited processes, network
+  connections, injected code, command lines, and data that is encrypted on disk.
+
+HOW TO ANALYZE
+  Volatility 3     vol -f <image>.raw windows.pslist
+                   then windows.pstree, windows.cmdline, windows.netscan, windows.malfind,
+                   windows.svcscan and windows.dlllist.
+  MemProcFS        Mounts the image as a drive letter: processes, handles and connections
+                   appear as folders and files, and it can build a timeline.
+  bulk_extractor   Carves URLs, domains, emails and IP addresses that the plugins don't parse.
+                   Convert its output with bulk-extractor-to-csv to read it.
+
+  Look for: odd parent/child pairs (Word starting PowerShell), injected code (malfind),
+  connections to unknown IP addresses, and programs running from Temp, AppData or ProgramData.
+'@ }
+
+@{ Paths = @('System'); Guide = '7.2'
+   Tools = @('Timeline Explorer', 'Notepad++', 'LOLDrivers'); Text = @'
+WHAT IS HERE
+  Live snapshots of the host: identity and OS build (identity.txt, systeminfo.txt), clock and
+  time zone (time.txt), accounts and groups, logged-on sessions, installed software and
+  hotfixes, drivers (drivers_hashed.csv), USB and other devices, disks and BitLocker, shadow
+  copies, virtual disks and ISO files, and a Prefetch listing.
+
+WHY IT MATTERS
+  It is the context for everything else: which OS, which time zone, who has admin rights,
+  what was installed when, and which drivers run in the kernel.
+
+HOW TO ANALYZE
+  Open the CSV files in Timeline Explorer and the TXT files in a text editor.
+  - time.txt first: note the time zone and any clock skew before you compare times.
+  - accounts.txt, local_groups.txt: unexpected members of Administrators or Remote Desktop Users.
+  - installed_software.csv: remote-access tools or unknown software installed recently.
+  - drivers_hashed.csv: filter Triage for "review" and match the hashes against LOLDrivers.
+  - shadow_copies.txt: missing shadow copies can be a sign of ransomware.
+'@ }
+
+@{ Paths = @('Network'); Guide = '7.3'
+   Tools = @('Timeline Explorer', 'Notepad++', 'VirusTotal', 'AbuseIPDB'); Text = @'
+WHAT IS HERE
+  connections.csv (TCP connections joined to the owning process), netstat and TCPView output,
+  dns_cache.csv, netconfig.txt (IP configuration, ARP, routes, hosts file, proxy),
+  net_extra.txt (port proxies, NetBIOS, Wi-Fi profiles), smb.txt (sessions, shares and files
+  open by remote clients) and named_pipes.txt.
+
+WHY IT MATTERS
+  It shows who the host was talking to when it was collected: command-and-control
+  connections, lateral movement over SMB, and pivoting through port proxies.
+
+HOW TO ANALYZE
+  Start with connections.csv in Timeline Explorer. Sort by process path and look for
+  programs that have no reason to talk to the internet. Cross-check with the netstat files.
+  - dns_cache.csv: random-looking or newly registered domains.
+  - netconfig.txt: a modified hosts file or an unexpected proxy is a red flag.
+  - net_extra.txt: every port proxy needs an explanation.
+  Look up IP addresses and domains on VirusTotal or AbuseIPDB.
+'@ }
+
+@{ Paths = @('Processes'); Guide = '7.4'
+   Tools = @('Timeline Explorer', 'VirusTotal', 'Volatility 3'); Text = @'
+WHAT IS HERE
+  processes.csv  Every running process: PID, parent PID, path, command line, user, start
+                 time (UTC), SHA-256 and signature status.
+  tasklist.txt   tasklist /v, the services inside each svchost, and loaded modules.
+
+WHY IT MATTERS
+  Malware has to run. This is the live process list at the moment of collection.
+
+HOW TO ANALYZE
+  Open processes.csv in Timeline Explorer and group by path or signature status. Look for:
+  unsigned programs; programs running from AppData, Temp, ProgramData or Users\Public;
+  encoded PowerShell (-enc); odd parent/child pairs; misspelled system names (scvhost.exe).
+  Search the SHA-256 values on VirusTotal. Compare with windows.pslist from the memory image
+  to find processes hidden from the live view.
+'@ }
+
+@{ Paths = @('Persistence'); Guide = '7.5'
+   Tools = @('Timeline Explorer', 'Notepad++', 'Sysinternals'); Text = @'
+WHAT IS HERE
+  The places Windows starts programs from automatically: run_keys.txt, services.csv,
+  schtasks.csv and scheduled_task_actions.csv, wmi_subscriptions.txt, startup items, bits.txt,
+  ifeo.csv (Image File Execution Options), accessibility_binaries.csv and
+  service_failure_actions.csv.
+
+WHY IT MATTERS
+  Attackers need to survive a reboot, so almost every intrusion leaves something here.
+
+HOW TO ANALYZE
+  CSV files in Timeline Explorer, TXT files in a text editor. Look for entries that point at
+  user-writable folders, script hosts (powershell, wscript, mshta, rundll32) with unusual
+  arguments, recently created tasks or services, and ANY IFEO debugger or WMI consumer (both
+  are rare on a clean machine). Compare with Tools\autoruns.csv (Sysinternals Autoruns).
+'@ }
+
+@{ Paths = @('Security'); Guide = '7.6'
+   Tools = @('Notepad++', 'Timeline Explorer'); Text = @'
+WHAT IS HERE
+  defender.txt (status, exclusions, detections), firewall.txt, auditpol.txt, gpresult.txt,
+  security_settings.txt (LSA protection, WDigest, RDP, UAC, PowerShell logging),
+  security_products.txt, credential_metadata.txt (names only, no secrets), certificates.csv,
+  etw_sessions.txt, code_integrity.txt, wfp_filters.xml and wfp_block_summary.csv,
+  sysmon_config.txt and, at Deep and Full, exfil_tools.csv.
+
+WHY IT MATTERS
+  It shows whether defenses were weakened before or during the intrusion.
+
+HOW TO ANALYZE
+  TXT files in a text editor, CSV files in Timeline Explorer. Red flags:
+  - Defender exclusions nobody can explain.
+  - UseLogonCredential=1 (WDigest keeps passwords in memory in clear text).
+  - Missing EventLog or Defender trace sessions in etw_sessions.txt.
+  - BLOCK filters on MsMpEng.exe, MsSense.exe or another security product in
+    wfp_block_summary.csv (cutting the EDR off from its cloud).
+  - The vulnerable driver blocklist turned off in code_integrity.txt.
+  - Root certificates nobody recognizes.
+'@ }
+
+@{ Paths = @('Security\DefenderQuarantine'); Guide = '7.6'
+   Tools = @('maldump', 'defender-dump', 'VirusTotal'); Text = @'
+WARNING: LIVE MALWARE
+  Decoding these files produces working malware. Only handle them in an isolated
+  malware-analysis VM, and store this folder as malware (encrypted archive, clearly labeled).
+
+WHAT IS HERE
+  A copy of Microsoft Defender's quarantine: Entries\, ResourceData\ and Resources\. The
+  files are RC4-encrypted with a well-known key, so they can't run as they are.
+
+WHY IT MATTERS
+  These are the samples Defender caught. Their original paths, detection names and hashes
+  tie the intrusion together, and the samples can be reverse engineered.
+
+HOW TO ANALYZE
+  In an isolated VM, never on your everyday workstation: maldump or defender-dump lists each
+  entry (original path, detection time) and extracts the samples. Search the hashes on
+  VirusTotal rather than uploading the samples.
+'@ }
+
+@{ Paths = @('EventLogs'); Guide = '7.7'
+   Tools = @('Timeline Explorer', 'EvtxECmd', 'Hayabusa', 'Chainsaw', 'Event Viewer'); Text = @'
+WHAT IS HERE
+  All\                Every .evtx event log, copied from the shadow copy (often 350+ files).
+  Live\               Live exports of Security, System, Application, PowerShell and Sysmon.
+  channel_config.csv  Every log channel: enabled or not, maximum size, record count,
+                      oldest record.
+
+WHY IT MATTERS
+  Logons, service installs, process creation, PowerShell script blocks, RDP sessions and log
+  clearing are all recorded here.
+
+HOW TO ANALYZE
+  1. Start with the parsed copy: Parsed\EvtxECmd\evtx_all.csv in Timeline Explorer. Filter by
+     EventId: 4624/4625 logons, 4688 process creation, 7045 service installed, 4104
+     PowerShell script block, 1102 and 104 log cleared.
+  2. Hunt with Sigma rules, then open the result in Timeline Explorer:
+       hayabusa csv-timeline -d "<this folder>\All" -o hayabusa_timeline.csv
+     Chainsaw does the same job.
+  3. To read one log, double-click the .evtx file to open it in Event Viewer.
+  In channel_config.csv, a disabled channel or a Security log shrunk to a tiny maximum size
+  is a sign of anti-forensics, even when the log itself looks clean.
+'@ }
+
+@{ Paths = @('Disk'); Guide = '7.8'
+   Tools = @('Timeline Explorer', 'Registry Explorer', 'WinDbg'); Text = @'
+WHAT IS HERE
+  Raw artifacts copied from a Volume Shadow Copy. The tree mirrors the original drive:
+  Disk\Windows\... is C:\Windows\... and Disk\Users\... is C:\Users\... Artifact folders
+  below this one have their own ANALYSIS_README.txt.
+
+  _CopyLog.csv                Every file copied, with its original path and times (UTC).
+  zone_identifier.csv         Mark-of-the-Web: where downloaded files came from (HostUrl).
+  remote_access_presence.csv  Remote-access tool configs recorded but not copied (Deep+).
+  iis_webroot_listing.csv     Web server files with hashes (Deep+, IIS servers only).
+  NTFS\, SystemFiles\, Accessibility_Binaries\, Volume_<X>\   Collected by other means.
+  Windows\MEMORY.DMP          A full kernel crash dump, if the machine had one (WinDbg).
+
+WHY IT MATTERS
+  These are the original files the parsed tables come from, for when you need to check a
+  detail or run a parser the collector didn't.
+
+HOW TO ANALYZE
+  Most of these files are already parsed into Parsed\ (and KAPE\Modules\ in Full): start
+  there. Come back here to open a raw file in a viewer. Always work on a copy: some viewers
+  (registry hives, ESE databases such as SRUM and WebCache) can change a file when they open it.
+'@ }
+
+@{ Paths = @('Disk\NTFS'); Guide = '7.8 and 7.10'
+   Tools = @('MFTECmd', 'MFTExplorer', 'Timeline Explorer', 'LogFileParser'); Text = @'
+WHAT IS HERE
+  MFT_C.bin             The $MFT: one record for every file and folder on C:, with timestamps.
+  LogFile_C.bin         $LogFile: the NTFS transaction log (recent metadata changes).
+  Boot_C.bin            $Boot: the volume boot record.
+  UsnJrnl_fsutil_C.csv  The USN change journal (file creates, renames, deletes) exported with
+                        fsutil. Its timestamps are in LOCAL time, not UTC.
+
+WHY IT MATTERS
+  The $MFT lists every file, including recently deleted ones, and comparing its two sets of
+  timestamps reveals timestomping. The USN journal shows files that were created and then
+  deleted again, such as attacker tools.
+
+HOW TO ANALYZE
+  Already parsed: Parsed\MFTECmd\MFT_C.csv. Open it in Timeline Explorer.
+  - SI<FN = True suggests timestomping; InUse = False means the file was deleted.
+  - Browse the raw $MFT interactively with MFTExplorer.
+  - To parse it again:  MFTECmd.exe -f MFT_C.bin --csv <output folder>
+  - $LogFile: LogFileParser.
+  - For the USN journal in UTC with full paths, prefer
+    KAPE\Modules\FileSystem\..._MFTECmd_$J_Output.csv (Full profile).
+'@ }
+
+@{ Paths = @('Disk\SystemFiles'); Guide = '7.8 and 10'
+   Tools = @('bulk_extractor', 'bulk-extractor-to-csv', 'Sysinternals', 'YARA', 'MemProcFS', 'Hibr2Bin', 'Volatility 3'); Text = @'
+WHAT IS HERE
+  pagefile_C.sys   Virtual memory: pieces of RAM that Windows moved out to disk.
+  hiberfil_C.sys   A compressed copy of RAM, written when the machine hibernates or shuts
+                   down with Fast Startup.
+  swapfile_C.sys   The paging file for Store (UWP) apps.
+  Despite the .sys extension these are NOT drivers. They have no file structure to open by
+  double-clicking.
+
+WHY IT MATTERS
+  They hold memory from before the RAM image was taken: processes that have exited, command
+  lines, URLs, chat fragments and malware that is no longer running.
+
+HOW TO ANALYZE
+  pagefile and swapfile are unstructured, so carve or search them:
+  - bulk_extractor -o <new output folder> pagefile_C.sys
+    then convert the output with bulk-extractor-to-csv.
+  - strings.exe pagefile_C.sys > pagefile_strings.txt   (Sysinternals), then search it.
+  - Scan them with YARA rules.
+  - MemProcFS can load the pagefile next to the memory image, so paged-out memory is filled in.
+  hiberfil: convert it first with Comae Hibr2Bin (in the toolkit), then analyze the result
+  like a second memory image with Volatility 3. The raw file is compressed, so carving it
+  directly finds little.
+'@ }
+
+@{ Paths = @('Disk\Accessibility_Binaries'); Guide = '7.5 and 7.8'
+   Tools = @('Sysinternals', 'VirusTotal'); Text = @'
+WHAT IS HERE
+  Copies of sethc.exe (Sticky Keys), utilman.exe (Ease of Access) and similar programs that
+  can be started from the Windows logon screen.
+
+WHY IT MATTERS
+  Replacing one of them with cmd.exe gives a SYSTEM command prompt at the logon screen
+  without a password: the "sticky keys" backdoor.
+
+HOW TO ANALYZE
+  Don't run them. Check the signature and version info with Sysinternals Sigcheck:
+    sigcheck.exe -h -a <file>
+  Compare the hashes with Persistence\accessibility_binaries.csv and with a clean machine on
+  the same Windows build, and search them on VirusTotal. A file that is really cmd.exe or
+  powershell.exe (check OriginalFilename), or that is unsigned, is a backdoor.
+'@ }
+
+@{ Paths = @('Disk\$Recycle.Bin', 'Disk\Volume_*\$Recycle.Bin'); Guide = '7.8 and 7.10'
+   Tools = @('RBCmd', 'Timeline Explorer'); Text = @'
+WHAT IS HERE
+  One folder per user SID (S-1-5-18 is the SYSTEM account).
+  $I<id>   Metadata of a deleted file: original path, size and deletion time.
+  $R<id>   The deleted file's content (copied in the Full profile only).
+  desktop.ini files are normal.
+
+WHY IT MATTERS
+  It shows what was deleted, from where and when, even after the file is gone.
+
+HOW TO ANALYZE
+  Already parsed: Parsed\RBCmd\. To parse again:
+    RBCmd.exe -d <this folder> --csv <output folder>
+  Match a SID folder to a user with ProfileList in Parsed\RECmd_System or with
+  System\accounts.txt. Treat $R files as untrusted; don't run deleted programs.
+'@ }
+
+@{ Paths = @('Disk\Volume_*'); Guide = '5.1 and 7.8'
+   Tools = @('Timeline Explorer', 'RBCmd'); Text = @'
+WHAT IS HERE
+  An extra internal drive. root_listing.csv lists the files at its root, recyclebin_listing.csv
+  lists its Recycle Bin, and $Recycle.Bin\ holds the $I metadata files.
+
+WHY IT MATTERS
+  Attackers stage tools and stolen data on drives other than C:.
+
+HOW TO ANALYZE
+  Open the CSV files in Timeline Explorer and sort by time. Parse $Recycle.Bin\ with RBCmd.
+  In the Full profile, KAPE\Targets_<X>\ has a fuller copy of this drive's file system data.
+'@ }
+
+@{ Paths = @('Disk\Windows\System32\config'); Guide = '7.8 and 7.10'
+   Tools = @('Registry Explorer', 'RECmd'); Text = @'
+WHAT IS HERE
+  The machine's registry hives: SYSTEM, SOFTWARE, SAM, SECURITY and DEFAULT, with their
+  transaction logs (.LOG1, .LOG2, .regtrans-ms, .blf). RegBack\, if present, holds older
+  backup copies.
+
+WHY IT MATTERS
+  Services, USB devices, network history, installed software, user accounts, autoruns, time
+  zone and last shutdown time all live here. SAM and SECURITY contain password hashes and
+  LSA secrets: handle this folder as sensitive.
+
+HOW TO ANALYZE
+  Already parsed: Parsed\RECmd_System\ (one CSV per plugin, plus one combined CSV).
+  Browse a hive interactively with Registry Explorer. When it asks, let it replay the .LOG1
+  and .LOG2 files (keep them in the same folder): without them, recent changes can be missing.
+  To parse again:
+    RECmd.exe -d <this folder> --bn BatchExamples\Kroll_Batch.reb --csv <output folder>
+'@ }
+
+@{ Paths = @('Disk\Windows\System32\Tasks'); Guide = '7.5 and 7.8'
+   Tools = @('Notepad++'); Text = @'
+WHAT IS HERE
+  One XML file per scheduled task (the files have no extension), in folders that mirror
+  Task Scheduler's own folders.
+
+WHY IT MATTERS
+  Scheduled tasks are one of the most common persistence methods. The XML shows exactly what
+  runs, when and as which account, even for tasks hidden from schtasks.
+
+HOW TO ANALYZE
+  Open the files in a text editor and read:
+    <Actions><Exec><Command> and <Arguments>   what runs
+    <Triggers>                                 when it runs
+    <Principal>                                which account it runs as
+    <RegistrationInfo><Date> and <Author>      when and by whom it was created
+  Look for commands in user-writable folders, script hosts, encoded PowerShell, and tasks
+  outside the Microsoft\ folder that you don't recognize. Compare with
+  Persistence\scheduled_task_actions.csv: a task that is here but missing there may be hidden.
+'@ }
+
+@{ Paths = @('Disk\Windows\System32\sru'); Guide = '7.8 and 7.10'
+   Tools = @('SrumECmd', 'ESEDatabaseView', 'Timeline Explorer'); Text = @'
+WHAT IS HERE
+  SRUDB.dat, the System Resource Usage Monitor database (an ESE database), with its
+  transaction files (.log, .chk, .jrs, .jfm). The .log files are part of the database, not
+  text logs.
+
+WHY IT MATTERS
+  About 30 to 60 days of per-application history: bytes sent and received per app per hour,
+  CPU time and energy use. Good for spotting data exfiltration and programs that have since
+  been deleted.
+
+HOW TO ANALYZE
+  Already parsed: Parsed\SrumECmd\ (NetworkUsages, AppResourceUseInfo).
+  To parse again:  SrumECmd.exe -f SRUDB.dat -r <SOFTWARE hive> --csv <output folder>
+  If it reports a dirty database, repair a COPY of this folder first:
+    esentutl /r sru /i      then      esentutl /p SRUDB.dat
+  ESEDatabaseView shows the raw tables.
+'@ }
+
+@{ Paths = @('Disk\Windows\System32\wbem\Repository'); Guide = '7.5 and 7.8'
+   Tools = @('PyWMIPersistenceFinder', 'Velociraptor'); Text = @'
+WHAT IS HERE
+  The WMI repository: OBJECTS.DATA, INDEX.BTR and MAPPING1-3.MAP.
+
+WHY IT MATTERS
+  WMI event subscriptions (a filter, a consumer and a binding) are fileless persistence: a
+  command runs when an event fires, with nothing in the Run keys or scheduled tasks. Traces of
+  removed consumers can remain in OBJECTS.DATA.
+
+HOW TO ANALYZE
+  First read Persistence\wmi_subscriptions.txt (the live view) and, in the Full profile,
+  Velociraptor's PermanentWMIEvents collection. Then search the repository offline:
+    python PyWMIPersistenceFinder.py OBJECTS.DATA
+  Any CommandLineEventConsumer or ActiveScriptEventConsumer that doesn't belong to known
+  software deserves a close look. "SCM Event Log Consumer" is a normal Windows default.
+'@ }
+
+@{ Paths = @('Disk\Windows\System32\drivers\etc'); Guide = '7.3'
+   Tools = @('Notepad++'); Text = @'
+WHAT IS HERE
+  hosts: the local name-resolution file, checked before DNS.
+
+WHY IT MATTERS
+  Attackers edit it to redirect domains, for example to block security updates or to send a
+  bank's domain to a fake site.
+
+HOW TO ANALYZE
+  Open it in a text editor. A clean file has only comment lines (starting with #), sometimes
+  with localhost entries. Every other entry needs an explanation. Network\netconfig.txt has
+  the live copy.
+'@ }
+
+@{ Paths = @('Disk\Windows\System32\GroupPolicy'); Guide = '7.6'
+   Tools = @('LGPO', 'Notepad++'); Text = @'
+WHAT IS HERE
+  Local Group Policy: Machine\ and User\ folders with Registry.pol (the policy settings) and
+  Scripts\ (startup, shutdown, logon and logoff scripts listed in scripts.ini and
+  psscripts.ini).
+
+WHY IT MATTERS
+  Logon and startup scripts are a persistence method, and policy can switch off Defender or
+  logging.
+
+HOW TO ANALYZE
+  scripts.ini and psscripts.ini are text: check every script they point to.
+  Registry.pol is binary. Microsoft's LGPO prints it as text:
+    LGPO.exe /parse /m Machine\Registry.pol      (use /u for User\Registry.pol)
+  Compare with Security\gpresult.txt, which shows the policy actually applied.
+'@ }
+
+@{ Paths = @('Disk\Windows\System32\LogFiles'); Guide = '7.8'
+   Tools = @('klogg', 'Notepad++', 'SumECmd', 'KStrike'); Text = @'
+WHAT IS HERE
+  Firewall\   pfirewall.log, the Windows Firewall log (only if logging was turned on).
+  Scm\        Service Control Manager files.
+  Sum\        User Access Logging databases (Windows Server only; ESE databases).
+
+WHY IT MATTERS
+  The firewall log records allowed and dropped connections with addresses and ports. User
+  Access Logging records which users and client IP addresses used a server's roles (file
+  shares, for example) over the last two years or so.
+
+HOW TO ANALYZE
+  pfirewall.log is space-separated text: open it in klogg or Notepad++, or import it into a
+  spreadsheet with space as the delimiter. The #Fields line names the columns.
+  Sum\: SumECmd.exe -d <Sum folder> --csv <output folder>, or KStrike. In the Full profile
+  KAPE\Modules\SUMDatabase\ may already have it. Work on a copy: ESE databases are often dirty.
+  Scm\: open the files in a text editor.
+'@ }
+
+@{ Paths = @('Disk\Windows\System32\inetsrv'); Guide = '7.8'
+   Tools = @('Notepad++', 'Timeline Explorer'); Text = @'
+WHAT IS HERE
+  config\applicationHost.config and other IIS configuration files (Deep+, IIS servers only).
+
+WHY IT MATTERS
+  It lists every web site, virtual directory and module that IIS loads. A malicious IIS
+  module is a known, stealthy backdoor.
+
+HOW TO ANALYZE
+  Open the .config files in a text editor. In <globalModules> and <modules>, check each
+  module's image path and compare with a clean server: a module outside
+  %windir%\System32\inetsrv deserves a close look. Then check Disk\iis_webroot_listing.csv
+  in Timeline Explorer for new scripts in the site folders (sort by ModifiedUtc).
+'@ }
+
+@{ Paths = @('Disk\inetpub\logs'); Guide = '7.8'
+   Tools = @('klogg', 'Notepad++'); Text = @'
+WHAT IS HERE
+  IIS web server logs in W3C format, one folder per site (W3SVC1, W3SVC2 and so on).
+
+WHY IT MATTERS
+  Every request to the server: web shell use, exploitation attempts, scanning and downloads
+  of stolen data.
+
+HOW TO ANALYZE
+  The logs are space-separated text; the #Fields line names the columns. Times are UTC by
+  default. Use klogg for large files. Search for POST requests to unusual .aspx, .ashx or
+  .php files, parameters such as cmd=, long encoded strings, and requests from IP addresses
+  already linked to the attacker.
+'@ }
+
+@{ Paths = @('Disk\Windows\Prefetch'); Guide = '7.8 and 7.10'
+   Tools = @('PECmd', 'Timeline Explorer'); Text = @'
+WHAT IS HERE
+  .pf files, one per program that has run (NAME-HASH.pf).
+
+WHY IT MATTERS
+  Proof of execution: run count, the last eight run times, and the files and folders the
+  program used in its first seconds. It survives after the program is deleted.
+
+HOW TO ANALYZE
+  Already parsed: Parsed\PECmd\ (Output.csv, plus Timeline.csv with one row per run).
+  To parse again:  PECmd.exe -d <this folder> --csv <output folder>
+  Windows 10 and 11 compress these files; PECmd handles that. Look for tools that ran from
+  Temp or Downloads, renamed tools (check the FilesLoaded column), and programs that ran
+  once around the time of the incident.
+'@ }
+
+@{ Paths = @('Disk\Windows\appcompat\Programs'); Guide = '7.8 and 7.10'
+   Tools = @('AmcacheParser', 'Registry Explorer', 'VirusTotal'); Text = @'
+WHAT IS HERE
+  Amcache.hve (a registry hive) and its transaction logs.
+
+WHY IT MATTERS
+  Programs and drivers that were present or run, with SHA-1 hash, path, publisher and times.
+  Useful when the program itself is gone. On its own it shows a program existed, not that it
+  ran.
+
+HOW TO ANALYZE
+  Already parsed: Parsed\Amcache\. To parse again:
+    AmcacheParser.exe -f Amcache.hve --csv <output folder>
+  Browse it in Registry Explorer. Search the SHA-1 values on VirusTotal.
+'@ }
+
+@{ Paths = @('Disk\Windows\appcompat\pca'); Guide = '7.8'
+   Tools = @('Notepad++'); Text = @'
+WHAT IS HERE
+  Program Compatibility Assistant files (Windows 11 22H2 and later): PcaAppLaunchDic.txt and,
+  if present, PcaGeneralDb0.txt and PcaGeneralDb1.txt.
+
+WHY IT MATTERS
+  PcaAppLaunchDic.txt records programs started from Explorer, with a last-run time in UTC:
+  evidence of execution that survives deleting the program.
+
+HOW TO ANALYZE
+  Open the files in a text editor. Each line of PcaAppLaunchDic.txt is path|time. Search for
+  programs in Temp, Downloads or on USB drives.
+'@ }
+
+@{ Paths = @('Disk\Windows\inf'); Guide = '7.2 and 7.8'
+   Tools = @('Notepad++', 'klogg', 'Registry Explorer'); Text = @'
+WHAT IS HERE
+  setupapi.dev.log, setupapi.app.log and setupapi.setup.log: device and driver installation
+  logs.
+
+WHY IT MATTERS
+  They record the first time each USB device was connected and every driver installed.
+
+HOW TO ANALYZE
+  Open them in a text editor or klogg. Search for USBSTOR or for a serial number from
+  System\usbstor.txt; the time on the ">>> Section start" line is the first connection.
+  These times are in LOCAL time. The USBSTOR key in the SYSTEM hive (Registry Explorer)
+  has the matching device list.
+'@ }
+
+@{ Paths = @('Disk\Windows\debug'); Guide = '7.8'
+   Tools = @('Notepad++'); Text = @'
+WHAT IS HERE
+  Logs from C:\Windows\debug, for example netsetup.log (joining a domain), mrt.log (Malicious
+  Software Removal Tool results), dcpromo logs on domain controllers, and PASSWD.LOG.
+
+WHY IT MATTERS
+  mrt.log shows what Microsoft's removal tool found and removed. netsetup.log shows when and
+  to which domain the machine was joined.
+
+HOW TO ANALYZE
+  Open them in a text editor.
+'@ }
+
+@{ Paths = @('Disk\Windows\Panther'); Guide = '7.8'
+   Tools = @('Notepad++', 'Event Viewer'); Text = @'
+WHAT IS HERE
+  Windows Setup logs: setupact.log, setuperr.log, diagerr.xml, diagwrn.xml and setup.etl.
+
+WHY IT MATTERS
+  They date Windows installs and feature upgrades. An upgrade resets the timestamps of many
+  system files, which explains odd times in the $MFT.
+
+HOW TO ANALYZE
+  Open the .log and .xml files in a text editor. setup.etl opens in Event Viewer (Action >
+  Open Saved Log).
+'@ }
+
+@{ Paths = @('Disk\Windows\Minidump'); Guide = '7.8'
+   Tools = @('WinDbg', 'Volatility 3'); Text = @'
+WHAT IS HERE
+  Small kernel crash dumps (.dmp) written after a blue screen. A full dump, if there was one,
+  is Disk\Windows\MEMORY.DMP.
+
+WHY IT MATTERS
+  Vulnerable or malicious drivers often crash the system, and the dump names the driver.
+
+HOW TO ANALYZE
+  Open the .dmp in WinDbg and run  !analyze -v . Note the driver it blames (MODULE_NAME,
+  IMAGE_NAME) and look it up in System\drivers_hashed.csv. Volatility 3 can also read
+  crash dumps.
+'@ }
+
+@{ Paths = @('Disk\Windows\Tasks'); Guide = '7.5 and 7.8'
+   Tools = @('Sysinternals'); Text = @'
+WHAT IS HERE
+  Legacy scheduled tasks (.job files) and SA.DAT (Task Scheduler state).
+
+WHY IT MATTERS
+  Tasks created with the old at.exe-style interface land here. Fewer tools look here, which is
+  why attackers have used it.
+
+HOW TO ANALYZE
+  .job files are binary. strings.exe <file>.job (Sysinternals) shows the program path and
+  arguments. Modern tasks are in Disk\Windows\System32\Tasks.
+'@ }
+
+@{ Paths = @('Disk\Windows\ServiceProfiles'); Guide = '7.8'
+   Tools = @('Registry Explorer', 'RECmd'); Text = @'
+WHAT IS HERE
+  The NTUSER.DAT hives (with transaction logs) of the LocalService and NetworkService
+  accounts, and RustDesk logs when RustDesk runs as a service.
+
+WHY IT MATTERS
+  Malware running as a service account writes its per-user settings here, where few people
+  look.
+
+HOW TO ANALYZE
+  Open the hives in Registry Explorer (let it replay the logs) or parse them with RECmd.
+  Check the Run keys and recently written keys.
+'@ }
+
+@{ Paths = @('Disk\ProgramData\Microsoft\Network\Downloader'); Guide = '7.5 and 7.8'
+   Tools = @('BitsParser', 'ESEDatabaseView'); Text = @'
+WHAT IS HERE
+  The BITS (Background Intelligent Transfer Service) job queue: qmgr.db on Windows 10 and 11
+  (an ESE database) or qmgr0.dat / qmgr1.dat on older Windows, plus the database's
+  transaction files: edb.log and edbXXXXX.log, edb.chk, .jrs and .jfm.
+  The .log files are NOT text logs. They are part of the database and won't make sense in a
+  text editor.
+
+WHY IT MATTERS
+  BITS downloads and uploads files in the background and can run a command when a job
+  finishes. Attackers use it to download payloads and for persistence. Finished or cancelled
+  jobs can often still be recovered from these files.
+
+HOW TO ANALYZE
+  Work on a copy of the whole folder.
+  - BitsParser (Python) parses qmgr.db and the qmgr*.dat files and can carve deleted jobs;
+    see its README for the options.
+  - ESEDatabaseView browses qmgr.db.
+  Look for downloads from unknown hosts, files saved to Temp or ProgramData, and a
+  notification command line (a command BITS runs when the job ends). Persistence\bits.txt
+  lists the jobs that existed at collection time.
+'@ }
+
+@{ Paths = @('Disk\ProgramData\Microsoft\Search\Data\Applications\Windows'); Guide = '7.8'
+   Tools = @('SIDR', 'ESEDatabaseView', 'DB Browser for SQLite'); Text = @'
+WHAT IS HERE
+  The Windows Search index: Windows.edb (an ESE database, Windows 10) or Windows.db and
+  related .db files (SQLite, Windows 11). It can be several GB.
+
+WHY IT MATTERS
+  It indexes file names and paths, and often file contents and email text, including files
+  that have since been deleted.
+
+HOW TO ANALYZE
+  Work on a copy. SIDR (Search Index DB Reporter) parses both formats into CSV or JSON.
+  ESEDatabaseView browses Windows.edb; DB Browser for SQLite opens Windows.db.
+'@ }
+
+@{ Paths = @('Disk\ProgramData\Microsoft\Windows\WER'); Guide = '7.8'
+   Tools = @('Notepad++'); Text = @'
+WHAT IS HERE
+  Windows Error Reporting: ReportArchive\ and ReportQueue\ hold one folder per crash or hang,
+  each with a Report.wer text file and sometimes a small dump. The folder name starts with the
+  type: AppCrash_, AppHang_, Kernel_, NonCritical_ and so on.
+
+WHY IT MATTERS
+  Crashes of malware, of a security product being tampered with, or of lsass.exe (a sign of
+  credential theft attempts) leave a report with the program path and time.
+
+HOW TO ANALYZE
+  Open Report.wer in a text editor. Read AppPath, the faulting module, and the list of loaded
+  modules. EventTime is a Windows FILETIME number (convert it with an online FILETIME
+  converter or [DateTime]::FromFileTimeUtc(<number>) in PowerShell).
+'@ }
+
+@{ Paths = @('Disk\ProgramData\Microsoft\Windows Defender'); Guide = '7.6 and 7.8'
+   Tools = @('klogg', 'Notepad++', 'DetectionHistory parser'); Text = @'
+WHAT IS HERE
+  Support\                                  Defender's own logs: MPLog-*.log, MPDetection-*.log.
+  Scans\History\Service\DetectionHistory\   One binary file per detection.
+
+WHY IT MATTERS
+  MPLog records scans, detections and the programs Defender looked at, even when nothing was
+  detected. DetectionHistory keeps detections after the event logs have rolled over.
+
+HOW TO ANALYZE
+  The MPLog files are text: open them in klogg or Notepad++ and search for a malware name, a
+  file path or "Threat". Parse DetectionHistory with the DetectionHistory parser (Python).
+  Compare with Security\defender.txt and with Defender events 1116 and 1117 in the event logs.
+'@ }
+
+@{ Paths = @('Disk\ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp', 'Disk\Users\*\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup')
+   Guide = '7.5 and 7.8'; Tools = @('LECmd', 'Sysinternals'); Text = @'
+WHAT IS HERE
+  The contents of a Startup folder: usually shortcuts (.lnk). desktop.ini is normal.
+
+WHY IT MATTERS
+  Everything here runs when a user logs on: every user for the ProgramData folder, one user
+  for a folder under Users.
+
+HOW TO ANALYZE
+  LECmd.exe -f <shortcut>.lnk shows a shortcut's target and arguments
+  (LECmd.exe -d <this folder> --csv <output folder> for all of them).
+  A script or program here, or a shortcut to one in a user-writable folder, is suspicious.
+  Compare with Tools\autoruns.csv.
+'@ }
+
+@{ Paths = @('Disk\ProgramData\ssh', 'Disk\Users\*\.ssh'); Guide = '7.8'
+   Tools = @('Notepad++'); Text = @'
+WHAT IS HERE
+  OpenSSH files. Under ProgramData: administrators_authorized_keys, sshd_config, the public
+  host keys and logs\. Under a user: authorized_keys, known_hosts, config and *.pub files.
+  Private keys are never copied.
+
+WHY IT MATTERS
+  A planted public key in an authorized_keys file gives an attacker password-less access that
+  Autoruns doesn't show. known_hosts lists the servers this user connected to.
+
+HOW TO ANALYZE
+  Open the files in a text editor. Every key in an authorized_keys file should belong to
+  someone you can name (the comment at the end of each line is a hint, not proof). In
+  sshd_config check PasswordAuthentication, AuthorizedKeysFile and any Match blocks.
+  logs\sshd.log shows SSH logons.
+'@ }
+
+@{ Paths = @('Disk\ProgramData\AnyDesk', 'Disk\ProgramData\LogMeIn', 'Disk\Program Files*\TeamViewer',
+             'Disk\Program Files*\Splashtop', 'Disk\Program Files*\ScreenConnect', 'Disk\Program Files*\ATERA Networks',
+             'Disk\Users\*\AppData\Roaming\AnyDesk', 'Disk\Users\*\AppData\Roaming\TeamViewer',
+             'Disk\Users\*\AppData\Roaming\RustDesk', 'Disk\Users\*\AppData\Local\Temp\LogMeInLogs')
+   Guide = '7.8'; Tools = @('Notepad++', 'klogg', 'DB Browser for SQLite'); Text = @'
+WHAT IS HERE
+  Logs and connection records of a remote-access or remote-management tool (AnyDesk,
+  TeamViewer, RustDesk, Splashtop, ScreenConnect, Atera or LogMeIn).
+
+WHY IT MATTERS
+  Attackers often install or abuse legitimate remote-access tools. These files give
+  connection times, remote IDs or IP addresses, and file transfers.
+
+HOW TO ANALYZE
+  Most are text: open them in Notepad++ or klogg.
+  - AnyDesk: connection_trace.txt lists incoming connections (time, remote ID). In the
+    .trace files, search for "Logged in from" (IP addresses) and for file transfers.
+  - TeamViewer: Connections_incoming.txt (remote ID, name, start and end time) and the
+    *_Logfile.log files.
+  - ScreenConnect: Session.db is SQLite; open it in DB Browser for SQLite.
+  Compare remote IDs and IP addresses across machines. Disk\remote_access_presence.csv lists
+  related configs that were recorded but not copied.
+'@ }
+
+@{ Paths = @('Disk\Users\*\AppData\Local\Mega Limited\MEGAsync\logs'); Guide = '7.6 and 7.8'
+   Tools = @('klogg', 'Notepad++'); Text = @'
+WHAT IS HERE
+  MEGAsync client logs (Deep and Full). Logs only; no credentials are collected.
+
+WHY IT MATTERS
+  Uploads to MEGA cloud storage are a common way to steal data.
+
+HOW TO ANALYZE
+  Open the logs in klogg or a text editor (extract a copy first if a file is compressed).
+  Search for uploads, file names and times around the incident.
+'@ }
+
+@{ Paths = @('Disk\Users\*'); Guide = '7.8 and 7.10'
+   Tools = @('Registry Explorer', 'RECmd'); Text = @'
+WHAT IS HERE
+  One user's profile. NTUSER.DAT is this user's registry hive (with transaction logs). The
+  artifact folders below (AppData, .ssh, Documents) have their own ANALYSIS_README.txt.
+
+WHY IT MATTERS
+  NTUSER.DAT records what this user did: programs run (UserAssist), recent files (RecentDocs),
+  typed paths and commands (TypedPaths, RunMRU), Explorer searches (WordWheelQuery), mapped
+  drives and per-user autoruns.
+
+HOW TO ANALYZE
+  Already parsed: Parsed\RECmd_Users\. Browse it in Registry Explorer and let it replay the
+  .LOG1 and .LOG2 files when it asks. The folder name is the user name; ProfileList in
+  Parsed\RECmd_System maps it to a SID.
+'@ }
+
+@{ Paths = @('Disk\Users\*\AppData\Local\Microsoft\Windows'); Guide = '7.8 and 7.10'
+   Tools = @('SBECmd', 'ShellBags Explorer', 'Registry Explorer'); Text = @'
+WHAT IS HERE
+  UsrClass.dat (with transaction logs): this user's Classes registry hive. The subfolders
+  WebCache\, Explorer\ and Notifications\ have their own ANALYSIS_README.txt.
+
+WHY IT MATTERS
+  It holds ShellBags: every folder the user opened in Explorer, including folders on USB
+  drives and network shares and folders that have since been deleted, with times.
+
+HOW TO ANALYZE
+  Already parsed: Parsed\SBECmd\. Browse the folder tree in ShellBags Explorer. The hive also
+  opens in Registry Explorer.
+'@ }
+
+@{ Paths = @('Disk\Users\*\AppData\Local\Microsoft\Windows\WebCache'); Guide = '7.8 and 7.13'
+   Tools = @('BrowsingHistoryView', 'ESEDatabaseView'); Text = @'
+WHAT IS HERE
+  WebCacheV01.dat (an ESE database) with its transaction files (.log, .chk, .jrs, .jfm). The
+  .log files are part of the database, not text logs.
+
+WHY IT MATTERS
+  Internet Explorer and legacy Edge history, and file:/// entries that show local and
+  network files the user opened.
+
+HOW TO ANALYZE
+  Work on a copy: opening the database can replay the logs into it and change it.
+  - BrowsingHistoryView reads the history.
+  - ESEDatabaseView shows every table; the Container_<n> tables hold the URLs, including
+    file:/// entries.
+  If a tool reports a dirty database, repair the copy:
+    esentutl /r V01 /i      then      esentutl /p WebCacheV01.dat
+'@ }
+
+@{ Paths = @('Disk\Users\*\AppData\Local\Microsoft\Windows\Explorer'); Guide = '7.8'
+   Tools = @('Thumbcache Viewer'); Text = @'
+WHAT IS HERE
+  thumbcache_*.db and iconcache_*.db: Explorer's thumbnail and icon caches.
+
+WHY IT MATTERS
+  Thumbnails of pictures, videos and documents the user viewed in Explorer, kept even after
+  the original files were deleted or the USB drive was removed.
+
+HOW TO ANALYZE
+  Open each thumbcache_*.db in Thumbcache Viewer, save the images and export the report.
+  Thumbnails can show personal or illegal images: follow your organization's procedure for
+  handling them.
+'@ }
+
+@{ Paths = @('Disk\Users\*\AppData\Local\Microsoft\Windows\Notifications'); Guide = '7.8 and 7.10'
+   Tools = @('DB Browser for SQLite', 'SQLECmd'); Text = @'
+WHAT IS HERE
+  wpndatabase.db (SQLite) with its -wal and -shm files.
+
+WHY IT MATTERS
+  Windows notifications: message previews from chat and email apps, app names and times.
+
+HOW TO ANALYZE
+  Already parsed: Parsed\SQLECmd\ (NotificationsDB). In DB Browser for SQLite, the
+  Notification table's Payload column holds each notification as XML. Keep the .db, -wal and
+  -shm files together so the most recent rows are included.
+'@ }
+
+@{ Paths = @('Disk\Users\*\AppData\Local\Microsoft\OneDrive'); Guide = '7.8'
+   Tools = @('OneDriveExplorer', 'DB Browser for SQLite'); Text = @'
+WHAT IS HERE
+  logs\      OneDrive sync logs: .odl, .odlgz and .aodl files (obfuscated binary) and .loggz.
+  settings\  Sync settings and databases (.db SQLite files, .dat, .ini, .json).
+  No file content from the cloud is collected.
+
+WHY IT MATTERS
+  It shows which files were synced, uploaded, deleted or shared through OneDrive, and when:
+  a common way to steal data.
+
+HOW TO ANALYZE
+  OneDriveExplorer parses the .odl logs and the settings databases into a folder tree and
+  CSV. The .db files also open in DB Browser for SQLite.
+'@ }
+
+@{ Paths = @('Disk\Users\*\AppData\Local\ConnectedDevicesPlatform'); Guide = '7.8 and 7.10'
+   Tools = @('WxTCmd', 'DB Browser for SQLite'); Text = @'
+WHAT IS HERE
+  <id>\ActivitiesCache.db (SQLite) with its -wal and -shm files: the Windows Timeline.
+
+WHY IT MATTERS
+  Programs used and files opened, with start and end times (mostly Windows 10; Windows 11
+  records much less).
+
+HOW TO ANALYZE
+  Already parsed: Parsed\WxTCmd\. To parse again:
+    WxTCmd.exe -f ActivitiesCache.db --csv <output folder>
+  It also opens in DB Browser for SQLite.
+'@ }
+
+@{ Paths = @('Disk\Users\*\AppData\Local\Microsoft\Terminal Server Client\Cache'); Guide = '7.8'
+   Tools = @('bmc-tools'); Text = @'
+WHAT IS HERE
+  The Remote Desktop bitmap cache: bcache*.bmc and cache*.bin files.
+
+WHY IT MATTERS
+  When this user connected to another machine over RDP, small tiles of the remote screen
+  were cached. Put back together, they show what the user (or an attacker using this
+  account) saw on the remote machine.
+
+HOW TO ANALYZE
+  bmc-tools (Python) extracts the tiles and builds a collage:
+    python bmc-tools.py -s <this folder> -d <output folder> -b
+  Look through the images for commands, file names and window titles.
+'@ }
+
+@{ Paths = @('Disk\Users\*\AppData\Roaming\Microsoft\Windows\Recent', 'Disk\Users\*\AppData\Roaming\Microsoft\Office\Recent')
+   Guide = '7.8 and 7.10'; Tools = @('LECmd', 'JLECmd', 'JumpList Explorer'); Text = @'
+WHAT IS HERE
+  .lnk shortcuts that Windows (or Office) creates when the user opens a file or folder, and,
+  under Windows\Recent, AutomaticDestinations\ and CustomDestinations\ (Jump Lists, one
+  file per application).
+
+WHY IT MATTERS
+  Files and folders the user opened, including on USB and network drives, with the target's
+  times, the volume serial number and sometimes the machine's MAC address. They survive
+  deleting the target file.
+
+HOW TO ANALYZE
+  Already parsed: Parsed\LECmd\ and Parsed\JLECmd\. To parse again:
+    LECmd.exe -d <this folder> --csv <output folder>
+    JLECmd.exe -d <this folder> --csv <output folder>
+  JumpList Explorer shows Jump Lists interactively.
+'@ }
+
+@{ Paths = @('Disk\Users\*\AppData\Roaming\Microsoft\Windows\PowerShell\PSReadLine'); Guide = '7.8'
+   Tools = @('Notepad++'); Text = @'
+WHAT IS HERE
+  ConsoleHost_history.txt: this user's PowerShell command history (the last 4096 commands by
+  default).
+
+WHY IT MATTERS
+  Commands typed by an attacker often appear here word for word: downloads, credential
+  tools, lateral movement, Defender changes.
+
+HOW TO ANALYZE
+  Open it in a text editor. There are no timestamps; the file's last-modified time
+  (Disk\_CopyLog.csv) dates the last command. Search for Invoke-WebRequest, iwr, -enc,
+  Add-MpPreference, net user and similar.
+'@ }
+
+@{ Paths = @('Disk\Users\*\Documents', 'Disk\Users\*\OneDrive\Documents'); Guide = '7.8'
+   Tools = @('Notepad++'); Text = @'
+WHAT IS HERE
+  PowerShell_transcript.*.txt files, directly here or in date folders (yyyyMMdd), written
+  when PowerShell transcription is enabled. No other documents are collected.
+
+WHY IT MATTERS
+  Every command and its output, with a header naming the user, host, process and start time.
+
+HOW TO ANALYZE
+  Open them in a text editor, or search them all at once in PowerShell:
+    Get-ChildItem -Recurse -Filter 'PowerShell_transcript*' | Select-String 'Invoke-WebRequest'
+'@ }
+
+@{ Paths = @('Disk\Users\*\AppData\Local\Packages\Microsoft.WindowsNotepad_*\LocalState'); Guide = '7.8'
+   Tools = @('notepad_parser', 'Sysinternals'); Text = @'
+WHAT IS HERE
+  TabState\ and WindowState\: binary files kept by Windows 11 Notepad (Deep and Full).
+
+WHY IT MATTERS
+  They hold the text of open tabs, including text the user never saved to a file.
+
+HOW TO ANALYZE
+  notepad_parser converts the .bin files to readable output. For a quick look,
+  strings.exe <file>.bin (Sysinternals) shows the text.
+'@ }
+
+@{ Paths = @('Disk\Users\*\AppData\Local\Packages\Microsoft.MicrosoftStickyNotes_*\LocalState'); Guide = '7.8'
+   Tools = @('DB Browser for SQLite'); Text = @'
+WHAT IS HERE
+  plum.sqlite (with -wal and -shm files): Sticky Notes (Deep and Full).
+
+WHY IT MATTERS
+  Users write down all sorts of things on sticky notes, including server names and to-do
+  lists that date their activity.
+
+HOW TO ANALYZE
+  Open plum.sqlite in DB Browser for SQLite: the Note table's Text column holds the notes.
+'@ }
+
+@{ Paths = @('Disk\Users\*\AppData\Local\Google\Chrome\User Data', 'Disk\Users\*\AppData\Local\Microsoft\Edge\User Data',
+             'Disk\Users\*\AppData\Local\BraveSoftware\Brave-Browser\User Data', 'Disk\Users\*\AppData\Local\Vivaldi\User Data',
+             'Disk\Users\*\AppData\Local\Chromium\User Data', 'Disk\Users\*\AppData\Roaming\Opera Software\Opera Stable')
+   Guide = '7.13'; Tools = @('Hindsight', 'DB Browser for SQLite', 'SQLECmd'); Text = @'
+WHAT IS HERE
+  A Chromium-based browser (Chrome, Edge, Brave, Vivaldi, Chromium or Opera), one folder per
+  profile (Default, Profile 1 and so on):
+  History, Favicons, Top Sites, Shortcuts, Network Action Predictor   SQLite databases
+                                                (no file extension)
+  Bookmarks, Preferences, Secure Preferences   JSON
+  Sessions\                                    open tabs and windows
+  Extensions\<id>\<version>\manifest.json      installed extensions
+  No cookies, passwords or autofill data are collected.
+
+WHY IT MATTERS
+  Sites visited, downloads (with source URL and saved path), searches, typed URLs, and
+  extensions, including malicious ones.
+
+HOW TO ANALYZE
+  Already parsed: Parsed\SQLECmd\. Its times are in the LOCAL time of the collected
+  machine, not UTC.
+  - Hindsight parses a whole profile into one timeline (spreadsheet or SQLite).
+  - DB Browser for SQLite opens History directly: tables urls, visits and downloads. Chromium
+    times count microseconds since 1601-01-01 UTC.
+  - Look up each extension ID in the Chrome Web Store and check the permissions in its
+    manifest.json.
+'@ }
+
+@{ Paths = @('Disk\Users\*\AppData\Roaming\Mozilla\Firefox\Profiles'); Guide = '7.13'
+   Tools = @('DB Browser for SQLite', 'dejsonlz4'); Text = @'
+WHAT IS HERE
+  One folder per Firefox profile: places.sqlite (history, bookmarks, downloads),
+  favicons.sqlite, extensions.json, addons.json, prefs.js, handlers.json,
+  sessionstore.jsonlz4 and sessionstore-backups\.
+  No cookies, passwords or form data are collected.
+
+WHY IT MATTERS
+  Sites visited, downloads, bookmarks and add-ons, including malicious ones.
+
+HOW TO ANALYZE
+  - places.sqlite in DB Browser for SQLite: tables moz_places and moz_historyvisits. Times
+    count microseconds since 1970-01-01 UTC.
+  - Session files (.jsonlz4, .baklz4) are compressed JSON:  dejsonlz4 <file> <output>.json
+  - extensions.json lists the add-ons and where they came from.
+'@ }
+
+@{ Paths = @('Tools'); Guide = '7.9'
+   Tools = @('Timeline Explorer', 'VirusTotal', 'Notepad++'); Text = @'
+WHAT IS HERE
+  Output of Sysinternals tools run live: autoruns.csv, sigcheck_*.csv (unsigned programs
+  only, with hashes), handle.txt, listdlls.txt and logonsessions.txt. Also RawCopy logs and
+  *.err files (usually just the tool's banner, which is normal).
+
+WHY IT MATTERS
+  autoruns.csv is the most complete list of auto-start locations, with signatures.
+
+HOW TO ANALYZE
+  autoruns.csv in Timeline Explorer: filter Signer for "(Not verified)" and Image Path for
+  user-writable folders. Search the sigcheck hashes on VirusTotal. TXT files in a text editor.
+'@ }
+
+@{ Paths = @('Parsed'); Guide = '7.10 and 9'
+   Tools = @('Timeline Explorer', 'EvtxECmd', 'MFTECmd', 'PECmd'); Text = @'
+WHAT IS HERE
+  CSV output of Eric Zimmerman's command-line tools, one folder per tool: EvtxECmd, MFTECmd,
+  PECmd, Amcache, AppCompatCache, RECmd_System, RECmd_Users, SBECmd, LECmd, JLECmd,
+  SrumECmd, WxTCmd, SQLECmd and RBCmd. Each folder also has the tool's log.
+
+WHY IT MATTERS
+  The quickest way into the evidence: every artifact as a sortable, filterable table, with
+  times in UTC.
+
+HOW TO ANALYZE
+  Open the CSVs in Timeline Explorer (each file opens as a tab). Good places to start:
+  EvtxECmd\evtx_all.csv, the PECmd Timeline CSV, MFTECmd\MFT_C.csv and Amcache.
+  Exception: the SQLECmd browser CSVs are in the LOCAL time of the collected machine (see
+  manifest.json, Time.TimeZone). Large CSVs don't fit in Excel (1,048,576 rows); use
+  Timeline Explorer.
+'@ }
+
+@{ Paths = @('KAPE'); Guide = '7.11'
+   Tools = @('KAPE', 'Timeline Explorer', 'Registry Explorer'); Text = @'
+WHAT IS HERE
+  Targets\C\         KAPE's raw triage copy (!SANS_Triage), mirroring the drive, including the
+                     raw $MFT, $LogFile and $Extend\$J. With -KapeVss, Targets\VSS<n>\ hold
+                     copies from older shadow copies.
+  Targets_<X>\       Extra internal drives.
+  Modules\<Category>\  !EZParser CSV output, sorted by category.
+  kape_console.log   The full KAPE log.
+
+WHY IT MATTERS
+  A second, independent triage, plus the USN journal and shadow-copy versions that the
+  rest of the collection doesn't parse.
+
+HOW TO ANALYZE
+  Open the Modules\ CSVs in Timeline Explorer. FileSystem\..._MFTECmd_$J_Output.csv is the
+  USN journal in UTC with full paths. Open raw Targets\ files with the same Zimmerman tools
+  as Disk\ (Registry Explorer, MFTExplorer and so on). Compare VSS<n> copies with the
+  current files to see what changed.
+'@ }
+
+@{ Paths = @('Velociraptor'); Guide = '7.12'
+   Tools = @('Velociraptor'); Text = @'
+WHAT IS HERE
+  One zip per Velociraptor artifact (processes, network, services, startup items, tasks, WMI,
+  Amcache, Prefetch, LNK, SRUM, USN, MFT, browser history, RDP logons and more), each with the
+  results as JSON (one row per line), plus <artifact>_console.log. With -YaraRules, also
+  Windows.Detection.Yara.Process.zip and the rules used.
+
+WHY IT MATTERS
+  An independent parse of many of the same artifacts, with browser times in UTC.
+
+HOW TO ANALYZE
+  Import the zips into a Velociraptor server. A local one is enough:
+    velociraptor.exe gui
+  starts a server on your workstation and opens it in the browser. Then run the server
+  artifact Server.Utils.ImportCollection for each zip and browse the results. You can also
+  unzip a collection and read the JSON directly.
+'@ }
+)
+
+function Resolve-ReadmeDir {
+    # Expands a relative pattern ('Disk\Users\*\.ssh') into existing folders under $Root.
+    param([string]$Root, [string]$Pattern)
+    if ($Pattern -eq '.') { return , @($Root) }
+    $dirs = @($Root)
+    foreach ($seg in $Pattern.Split('\')) {
+        $next = New-Object System.Collections.Generic.List[string]
+        foreach ($d in $dirs) {
+            try {
+                if ($seg.IndexOfAny([char[]]'*?') -ge 0) { foreach ($c in [IO.Directory]::GetDirectories($d, $seg)) { $next.Add($c) } }
+                else { $p = [IO.Path]::Combine($d, $seg); if ([IO.Directory]::Exists($p)) { $next.Add($p) } }
+            }
+            catch { }
+        }
+        $dirs = $next.ToArray()
+        if (-not $dirs.Count) { break }
+    }
+    return , $dirs
+}
+
+function Format-AnalysisReadme {
+    param([hashtable]$Entry, [string]$RelativePath)
+    $sb = New-Object System.Text.StringBuilder
+    $line = '=' * 78
+    [void]$sb.AppendLine(('ANALYSIS_README.txt  -  {0}' -f $RelativePath))
+    [void]$sb.AppendLine($line)
+    [void]$sb.AppendLine(('Written by Collect_v3 {0}. Collect_v3 does not run or include the tools named' -f $ScriptVersion))
+    [void]$sb.AppendLine('here: use them afterwards on your analysis workstation, on a copy of this folder,')
+    [void]$sb.AppendLine('never on the machine that was collected.')
+    [void]$sb.AppendLine('')
+    [void]$sb.AppendLine(($Entry.Text.Trim() -replace "`r?`n", "`r`n"))
+    [void]$sb.AppendLine('')
+    [void]$sb.AppendLine('TOOLS (official project pages)')
+    foreach ($t in $Entry.Tools) {
+        $url = if ($ReadmeTools.Contains($t)) { $ReadmeTools[$t] } else { '' }
+        [void]$sb.AppendLine(('  {0} {1}' -f ($t + ' ').PadRight(26, '.'), $url).TrimEnd())
+    }
+    [void]$sb.AppendLine('')
+    [void]$sb.AppendLine('MORE DETAIL')
+    $word = if ($Entry.Guide -match ' and ') { 'sections' } else { 'section' }
+    [void]$sb.AppendLine(('  Collect_v3 user guide, {0} {1}:' -f $word, $Entry.Guide))
+    [void]$sb.AppendLine(('  {0}' -f $ReadmeGuideUrl))
+    $sb.ToString()
+}
+
+function Write-AnalysisReadmes {
+    param([string]$Root)
+    $done = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $kept = 0
+    foreach ($e in $AnalysisReadmes) {
+        foreach ($pat in $e.Paths) {
+            foreach ($dir in (Resolve-ReadmeDir -Root $Root -Pattern $pat)) {
+                if ($done.Contains($dir)) { continue }
+                try {
+                    if (-not [IO.Directory]::GetFileSystemEntries($dir).Length) { continue }
+                    $file = [IO.Path]::Combine($dir, 'ANALYSIS_README.txt')
+                    if ([IO.File]::Exists($file)) { $kept++; continue }   # never overwrite a collected file
+                    $rel = if ($dir.Length -gt $Root.Length) { $dir.Substring($Root.Length).TrimStart('\') } else { '(collection root)' }
+                    [IO.File]::WriteAllText($file, (Format-AnalysisReadme -Entry $e -RelativePath $rel), [Text.Encoding]::UTF8)
+                    [void]$done.Add($dir)
+                }
+                catch { Write-Log ('    ANALYSIS_README.txt not written in {0}: {1}' -f $dir, $_.Exception.Message) 'WARN' }
+            }
+        }
+    }
+    Write-Log ('Analysis READMEs: {0} ANALYSIS_README.txt file(s) written' -f $done.Count)
+    if ($kept) { Write-Log ('    {0} folder(s) already had a file named ANALYSIS_README.txt; left unchanged' -f $kept) }
+}
+
+if (-not $NoAnalysisReadme) {
+    try { Write-AnalysisReadmes -Root $CollectionRoot }
+    catch { Write-Log "Analysis READMEs failed: $($_.Exception.Message)" 'WARN' }
+}
 
 Write-Log ("Collection finished: {0}" -f ($counts -join ', '))
 Stop-Transcript | Out-Null    # stop BEFORE hashing so Collection.log is final

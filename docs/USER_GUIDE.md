@@ -1,6 +1,6 @@
 # Collect_v3 — Windows DFIR Collection Script: User Guide
 
-**Script version:** 3.4.2  **Runs on:** Windows 10 / 11 / Server 2016+ with Windows PowerShell 5.1  **Needs:** Administrator rights
+**Script version:** 3.5.0  **Runs on:** Windows 10 / 11 / Server 2016+ with Windows PowerShell 5.1  **Needs:** Administrator rights
 
 > 🛡️ Collect_v3 is a **blue-team** tool for incident responders, forensic analysts and researchers. It orchestrates freely available forensic tools, and their authors are credited in the [README](../README.md#credits). Please read [Purpose and responsible use](../README.md#purpose-and-responsible-use) before using it on a real case.
 
@@ -212,6 +212,7 @@ The 3.4 additions haven't been timed on the lab laptop yet. Allow some extra tim
 | `-NtpServer` | Compare the clock against an NTP server (needs network) | off |
 | `-Archive` | Zip or 7-Zip the finished collection into `<case folder>.7z`, with a `.7z.sha256` and a `.7z.log` beside it. The case folder itself is kept, unencrypted. | off |
 | `-ArchivePassword` | Encrypt the .7z with AES-256, file names included (pass a SecureString: `(Read-Host 'Archive password' -AsSecureString)`). A SecureString can't pass through `powershell.exe -File`, so use the `-Command "& .\Collect_v3.ps1 ... -ArchivePassword (Read-Host 'Archive password' -AsSecureString)"` form, or run the script directly. The password is given to 7-Zip on its command line, so hosts that log process command lines (Sysmon, event 4688, EDR) record it: use a password unique to the case. | none |
+| `-NoAnalysisReadme` | Don't write the `ANALYSIS_README.txt` guidance files (see section 7). | off (files are written) |
 
 ### 5.1 Extra internal drives
 
@@ -235,6 +236,8 @@ For each extra internal drive: Deep collects the raw `$MFT`, `$LogFile` and `$Bo
 ## 7. The output, folder by folder
 
 Every run creates `Collections\<CaseId>_<COMPUTER>_<yyyyMMddTHHmmssZ>\`, for example `IR-001_WORKSTATION01_20261105T024807Z`. Empty folders are deleted at the end, so a Quick run has fewer folders.
+
+**`ANALYSIS_README.txt` in every folder (from 3.5.0):** the collection root, each top-level folder and each artifact folder under `Disk\` (for example `Disk\SystemFiles`, `Disk\NTFS`, `Disk\ProgramData\Microsoft\Network\Downloader`, each user's browser and Recent folders) get a short plain-text file. It says what the files in that folder are, why they matter, how to analyze them, and links to the tools' official pages and to the matching section of this guide. It's a quick pointer for anyone who opens the folder without this guide, such as a new analyst or a student. Collect_v3 doesn't run or include any of those tools. Only folders that exist and aren't empty get a file, a collected file of the same name is never overwritten, and the files are written before hashing, so they're listed in `FileHashes.csv`. `-NoAnalysisReadme` turns them off. Some command-line parsers given a whole folder may report the extra `.txt` file as unrecognized, which is harmless.
 
 ### Quick reference: which tool opens which output
 
