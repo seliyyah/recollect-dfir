@@ -18,7 +18,7 @@ All notable changes to `Collect_v3.ps1`. Format based on [Keep a Changelog](http
 
 ### Verified
 - READMEs: against an empty copy of a real Full collection's folder tree plus the folders that collection didn't have (69 files written, every entry matched, every tool named has a link, a second run changed nothing), and in a live Standard run (29 files, all in `FileHashes.csv`).
-- Logging and the drive watch: with a simulated dropout (a `subst` drive removed and re-created during a run of the functions) and against the real event logs of the run where the drive dropped out. Not yet verified in a live run.
+- Logging and the drive watch: with a simulated dropout (a `subst` drive removed and re-created during a run of the functions) and against the real event logs of the run where the drive dropped out. A live Standard run with no dropout (70 OK, 6 expected SKIPs) gave a complete `Collection.log`, an OK drive check and no crash on exit. A real dropout during a live run is still untested.
 
 ## [3.4.2]
 

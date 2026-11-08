@@ -89,7 +89,7 @@ Only on a lab VM or a dedicated test machine. Snapshot the VM first.
 | `-Archive -ArchivePassword` / 7-Zip 23.01 | Verified (Standard run: 1,088 files, 782 MB → 58 MB; listing without the password fails, so headers are encrypted; `.sha256` matches). The password has to be passed with `-Command`, since a SecureString can't pass through `-File`. |
 | `-NtpServer` | **Unverified** |
 | `ANALYSIS_README.txt` writer (3.5.0) | Verified on a skeleton of a real Full collection's folder tree (69 files, all 60 entries matched, idempotent) and in a live Standard run (29 files, all in `FileHashes.csv`). |
-| Line-by-line `Collection.log`, output drive watch and check (3.5.0) | Verified with a simulated dropout (a `subst` drive removed and re-created: held-back lines written in order, the wait logged, a reconnect flags only its own step) and against the real event logs of a run where the USB output drive dropped (1 disk error and 2 reconnects found; WARN), and of a quiet minute (OK). **Unverified in a live run.** |
+| Line-by-line `Collection.log`, output drive watch and check (3.5.0) | Verified with a simulated dropout (a `subst` drive removed and re-created: held-back lines written in order, the wait logged, a reconnect flags only its own step) and against the real event logs of a run where the USB output drive dropped (1 disk error and 2 reconnects found; WARN), and of a quiet minute (OK). Live Standard run with no dropout: `Collection.log` complete from the first line to "Collection finished", check row OK, no PowerShell crash on exit. **A real dropout during a live run is still untested.** |
 
 ### 3.4.0 additions
 
