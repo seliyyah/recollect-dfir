@@ -2648,13 +2648,17 @@ function Get-OutputDriveCheck {
     }
     if ($script:OutDiskSerial) {
         try {
+            # A reconnect logs two 1006 events: Capacity 0 as the drive goes, then the real capacity as it comes back.
+            # Count only the second kind, so one reconnect counts once.
             $arrivals = @(Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-Partition/Diagnostic'; Id = 1006; StartTime = $since } -ErrorAction Stop |
-                Where-Object { $_.ToXml() -match ('<Data Name=.SerialNumber.>\s*{0}\s*</Data>' -f [regex]::Escape($script:OutDiskSerial)) }).Count
+                Where-Object { $x = $_.ToXml()
+                    ($x -match ('<Data Name=.SerialNumber.>\s*{0}\s*</Data>' -f [regex]::Escape($script:OutDiskSerial))) -and
+                    ($x -notmatch '<Data Name=.Capacity.>\s*0\s*</Data>') }).Count
         }
         catch { if ($_.Exception.Message -notmatch 'No events were found') { $notes.Add('Partition log not readable') } }
     }
-    if ($script:OutRemounts) { $notes.Insert(0, ('{0} reconnect(s) seen between steps' -f $script:OutRemounts)) }
-    if ($arrivals) { $notes.Insert(0, ('output disk connected {0} time(s) during the run (Partition event 1006)' -f $arrivals)) }
+    if ($script:OutRemounts) { $notes.Insert(0, ('{0} reconnect(s) noticed by the per-step checks' -f $script:OutRemounts)) }
+    if ($arrivals) { $notes.Insert(0, ('output disk reconnected {0} time(s) during the run (Partition event 1006)' -f $arrivals)) }
     if ($diskErr) { $notes.Insert(0, ('{0} disk error(s) on the output disk (System log, source disk)' -f $diskErr)) }
     if ($diskErr -or $arrivals -or $script:OutRemounts -or $script:OutputLost) {
         $row.Status = 'WARN'
