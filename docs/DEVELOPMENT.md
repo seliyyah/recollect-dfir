@@ -35,10 +35,12 @@ For anyone (human or AI assistant) changing `Collect_v3.ps1`.
   - uses `Test-ToolRunnable` to skip framework-dependent .NET apps whose runtime major version isn't installed
 - **Shadow copy:** created in phase 5 and mounted through a directory symlink under `%SystemRoot%\Temp`, so hashing never walks it. `Copy-VssArtifact` copies from it. `Remove-Vss` is idempotent and runs before phase 8 and in a `finally` block.
 - **Extra volumes:** `Get-InternalVolume` uses `Get-Partition` / `Get-Disk` (BusType allowlist), with a `Win32_LogicalDisk` fallback. `$Ctx.ExtraVolumes` holds the drives selected. `Get-NtfsVolumeList` returns the system drive plus the extra NTFS drives.
+- **Logging (3.5.0):** `Write-Log` prints to the console and appends the same line to `Collection.log` with `Add-LogLine` (open, append, close). There is no `Start-Transcript`: a transcript keeps one handle open, so a USB output drive that drops for a few seconds kills it for the rest of the run, and powershell.exe then crashes on exit. Lines that can't be written are held in `$script:LogPending` and written with the next line that succeeds.
+- **Output drive watch (3.5.0):** `Get-DosDevice` reads the NT device behind the output drive letter. `Wait-OutputDrive` (before each step) waits up to 120 s for an unreachable output folder; `Get-OutputDropNote` (after each step) marks the step WARN if the device name changed, which happens on every disconnect and reconnect. `Get-OutputDriveCheck` adds a phase 9 row from the System log (source `disk`, matched by `\HarddiskN\`) and the Partition log (event 1006, matched by the output disk's serial number).
 - **After collection:**
-  1. `CollectorResults.csv`
+  1. output drive check, then `CollectorResults.csv`
   2. `manifest.json` (built field by field with `Set-ManifestField`) and `manifest.txt`
-  3. `Stop-Transcript`
+  3. `ANALYSIS_README.txt` files, then the last flush of `Collection.log`
   4. SHA-256 of every file into `FileHashes.csv`
   5. optional archive
 
@@ -48,7 +50,7 @@ For anyone (human or AI assistant) changing `Collect_v3.ps1`.
    - never write to the system drive or another internal disk unless `-AllowSystemDrive` is given
    - call host binaries by full path
    - keep all timestamps UTC (or label them clearly, as with the fsutil USN CSV)
-   - hash after the transcript closes
+   - hash after the last write to `Collection.log`
    - remove only what the script itself created
 2. **Windows PowerShell 5.1 compatibility:**
    - no ternary, `??`, `?.` or `&&`
@@ -86,7 +88,8 @@ Only on a lab VM or a dedicated test machine. Snapshot the VM first.
 | Extra-internal-volume collection | **Unverified**: no test machine with a second internal disk yet |
 | `-Archive -ArchivePassword` / 7-Zip 23.01 | Verified (Standard run: 1,088 files, 782 MB → 58 MB; listing without the password fails, so headers are encrypted; `.sha256` matches). The password has to be passed with `-Command`, since a SecureString can't pass through `-File`. |
 | `-NtpServer` | **Unverified** |
-| `ANALYSIS_README.txt` writer (3.5.0) | Verified on a skeleton of a real Full collection's folder tree (69 files, all 60 entries matched, idempotent). **Unverified in a live run.** |
+| `ANALYSIS_README.txt` writer (3.5.0) | Verified on a skeleton of a real Full collection's folder tree (69 files, all 60 entries matched, idempotent) and in a live Standard run (29 files, all in `FileHashes.csv`). |
+| Line-by-line `Collection.log`, output drive watch and check (3.5.0) | Verified with a simulated dropout (a `subst` drive removed and re-created: held-back lines written in order, the wait logged, a reconnect flags only its own step) and against the real event logs of a run where the USB output drive dropped (1 disk error and 2 reconnects found; WARN), and of a quiet minute (OK). **Unverified in a live run.** |
 
 ### 3.4.0 additions
 

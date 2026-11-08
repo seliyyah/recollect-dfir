@@ -142,7 +142,27 @@ function Write-Log {
         [ValidateSet('INFO', 'WARN', 'ERROR', 'OK', 'SKIP')][string]$Level = 'INFO'
     )
     $color = @{ INFO = 'Gray'; WARN = 'Yellow'; ERROR = 'Red'; OK = 'Green'; SKIP = 'DarkYellow' }[$Level]
-    Write-Host ('[{0}] [{1,-5}] {2}' -f (Get-UtcStamp), $Level, $Message) -ForegroundColor $color
+    $line = '[{0}] [{1,-5}] {2}' -f (Get-UtcStamp), $Level, $Message
+    Write-Host $line -ForegroundColor $color
+    Add-LogLine $line
+}
+
+# Collection.log is written line by line (open, append, close) instead of with Start-Transcript. A transcript holds
+# one file handle for the whole run: when a USB output drive drops for even a few seconds, that handle is dead for
+# good, the rest of the run is missing from the log, and powershell.exe crashes on exit flushing it (seen twice on
+# the lab laptop). Lines that can't be written (drive gone, or before the log path is known) are kept in memory and
+# written with the next line that succeeds, so nothing is lost once the drive is back.
+$script:LogPath    = $null
+$script:LogPending = New-Object System.Collections.Generic.List[string]
+function Add-LogLine {
+    param([string]$Line)
+    if ($null -ne $Line) { $script:LogPending.Add($Line) }
+    if (-not $script:LogPath -or -not $script:LogPending.Count) { return }
+    try {
+        [IO.File]::AppendAllText($script:LogPath, (($script:LogPending -join "`r`n") + "`r`n"), [Text.Encoding]::UTF8)
+        $script:LogPending.Clear()
+    }
+    catch { }   # output drive unavailable: keep the lines for the next attempt
 }
 
 # QuickEdit: one stray click in the console window starts a text selection, and Windows then blocks every
@@ -447,7 +467,71 @@ foreach ($f in 'Memory', 'System', 'Network', 'Processes', 'Persistence', 'Secur
     New-Item -ItemType Directory -Force -Path (Join-Path $CollectionRoot $f) | Out-Null
 }
 
-Start-Transcript -Path (Join-Path $CollectionRoot 'Collection.log') -Force | Out-Null
+$script:LogPath = Join-Path $CollectionRoot 'Collection.log'
+Add-LogLine ('Collect_v3 log | started {0} | {1} | user {2}\{3} | PowerShell {4} | PID {5}' -f (Get-UtcStamp), $HostName,
+    $env:USERDOMAIN, $env:USERNAME, $PSVersionTable.PSVersion, $PID)
+
+# Output drive watch. The NT device behind the output drive letter (\Device\HarddiskVolumeN) gets a new number when
+# the drive is disconnected and reconnected, even for a few seconds, so comparing it after each step shows which
+# steps overlapped a dropout. Null for a UNC output path or if the lookup fails (then there is no per-step check).
+function Get-DosDevice {
+    param([string]$Drive)
+    try {
+        if (-not ('DfirNative.Dos' -as [type])) {
+            Add-Type -Namespace DfirNative -Name Dos -MemberDefinition @'
+[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] public static extern uint QueryDosDeviceW(string lpDeviceName, System.Text.StringBuilder lpTargetPath, int ucchMax);
+'@
+        }
+        $sb = New-Object System.Text.StringBuilder 1024
+        if ([DfirNative.Dos]::QueryDosDeviceW($Drive, $sb, $sb.Capacity) -eq 0) { return $null }
+        return $sb.ToString()
+    } catch { return $null }
+}
+$script:OutDrive    = if ($CollectionRoot -match '^([A-Za-z]:)') { $Matches[1].ToUpper() } else { $null }
+$script:OutDevice   = if ($script:OutDrive) { Get-DosDevice $script:OutDrive } else { $null }
+$script:OutDiskSerial = $null
+$script:OutDiskNumber = $null
+if ($script:OutDrive) {
+    try {
+        $p = Get-Partition -DriveLetter $script:OutDrive.TrimEnd(':') -ErrorAction Stop
+        $script:OutDiskNumber = $p.DiskNumber
+        $script:OutDiskSerial = "$((Get-Disk -Number $p.DiskNumber -ErrorAction Stop).SerialNumber)".Trim()
+    } catch { }
+}
+$script:OutRemounts = 0
+$script:OutputLost  = $false
+
+function Wait-OutputDrive {
+    # Before each step: if the output folder is unreachable, wait up to 2 minutes for the drive to come back.
+    if ([IO.Directory]::Exists($CollectionRoot)) { return $true }
+    if ($script:OutputLost) { return $false }
+    Write-Log "Output folder unreachable ($CollectionRoot): waiting up to 120 s for the drive to come back" 'WARN'
+    $deadline = [DateTime]::UtcNow.AddSeconds(120)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        Start-Sleep -Seconds 2
+        if ([IO.Directory]::Exists($CollectionRoot)) {
+            $now = if ($script:OutDrive) { Get-DosDevice $script:OutDrive } else { $null }
+            if ($now -and $now -ne $script:OutDevice) { $script:OutDevice = $now; $script:OutRemounts++ }
+            Write-Log 'Output folder reachable again; continuing' 'WARN'
+            return $true
+        }
+    }
+    $script:OutputLost = $true
+    Write-Log 'The output drive did not come back: the remaining steps are skipped' 'ERROR'
+    return $false
+}
+
+function Get-OutputDropNote {
+    # After each step: a different device name means the drive was disconnected and reconnected during the step.
+    if (-not $script:OutDevice) { return $null }
+    $now = Get-DosDevice $script:OutDrive
+    if (-not $now) { return 'the output drive was unavailable when this step finished; check its output' }
+    if ($now -ne $script:OutDevice) {
+        $script:OutDevice = $now; $script:OutRemounts++
+        return 'the output drive was disconnected and reconnected during this step; check its output'
+    }
+    return $null
+}
 
 Write-Log "Collect_v3 $ScriptVersion | Case=$CaseId | Operator=$Operator | Host=$HostName | Profile=$CollectionProfile"
 Write-Log "Output: $CollectionRoot"
@@ -643,10 +727,12 @@ function Invoke-Collector {
     elseif ($C.Needs -and -not @($C.Needs | Where-Object { $Tool[$_] }).Count) { $skip = 'tool not found: ' + ($C.Needs -join ' / ') }
     elseif ($C.NeedsVss -and -not $Ctx.ShadowLink) { $skip = 'no VSS snapshot available' }
     elseif ($C.OnlyWithoutVss -and $Ctx.ShadowLink) { $skip = 'VSS copy in use; fallback not needed' }
+    elseif (-not (Wait-OutputDrive)) { $skip = 'output drive unavailable' }
 
     if ($skip) {
         $row.Status = 'SKIPPED'; $row.Note = $skip
-        Write-Log "[P$($C.Phase)] $($C.Name): $skip" 'SKIP'
+        if ($script:OutputLost -and $skip -eq 'output drive unavailable') { $row.Status = 'FAIL' }   # not run: a failure, not a choice
+        Write-Log "[P$($C.Phase)] $($C.Name): $skip" $(if ($row.Status -eq 'FAIL') { 'ERROR' } else { 'SKIP' })
         $script:Results.Add([pscustomobject]$row)
         return
     }
@@ -691,6 +777,11 @@ function Invoke-Collector {
     finally {
         $sw.Stop()
         $row.Seconds = [math]::Round($sw.Elapsed.TotalSeconds, 1)
+    }
+    $drop = Get-OutputDropNote
+    if ($drop) {
+        if ($row.Status -eq 'OK') { $row.Status = 'WARN' }
+        $row.Note = ("$($row.Note) $drop").Trim()
     }
 
     $lvl = switch ($row.Status) { 'OK' { 'OK' } 'WARN' { 'WARN' } default { 'ERROR' } }
@@ -2536,6 +2627,47 @@ finally {
     if (-not $collectorsDone) { Restore-QuickEdit }   # aborted: give the operator their console back now
 }
 
+# Output drive check: did the output disk drop out or report errors during the run? Per-step checks catch a
+# reconnect that changed the volume's device name; the System log (disk errors such as event 51, "error during a
+# paging operation") and the Partition log (event 1006, written each time a disk arrives, with its serial number)
+# also catch drops between steps. WARN only on evidence of a problem, so a healthy drive never raises one.
+function Get-OutputDriveCheck {
+    $row = [ordered]@{ Phase = 9; Name = 'Output drive check (disconnects and disk errors during the run)'; Status = 'OK'; Exit = ''
+        Seconds = 0; StartUtc = (Get-UtcStamp); Output = ''; Rows = ''; Note = '' }
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    $notes = New-Object System.Collections.Generic.List[string]
+    if (-not $script:OutDrive) { $row.Note = 'output is not on a drive letter; not checked'; return [pscustomobject]$row }
+    $since = $ScriptStartUtc.ToLocalTime()
+    $diskErr = 0; $arrivals = 0
+    if ($null -ne $script:OutDiskNumber) {
+        try {
+            $diskErr = @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = 'disk'; StartTime = $since } -ErrorAction Stop |
+                Where-Object { $_.Message -match ('\\Harddisk{0}\\' -f $script:OutDiskNumber) }).Count
+        }
+        catch { if ($_.Exception.Message -notmatch 'No events were found') { $notes.Add('System log not readable') } }
+    }
+    if ($script:OutDiskSerial) {
+        try {
+            $arrivals = @(Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-Partition/Diagnostic'; Id = 1006; StartTime = $since } -ErrorAction Stop |
+                Where-Object { $_.ToXml() -match ('<Data Name=.SerialNumber.>\s*{0}\s*</Data>' -f [regex]::Escape($script:OutDiskSerial)) }).Count
+        }
+        catch { if ($_.Exception.Message -notmatch 'No events were found') { $notes.Add('Partition log not readable') } }
+    }
+    if ($script:OutRemounts) { $notes.Insert(0, ('{0} reconnect(s) seen between steps' -f $script:OutRemounts)) }
+    if ($arrivals) { $notes.Insert(0, ('output disk connected {0} time(s) during the run (Partition event 1006)' -f $arrivals)) }
+    if ($diskErr) { $notes.Insert(0, ('{0} disk error(s) on the output disk (System log, source disk)' -f $diskErr)) }
+    if ($diskErr -or $arrivals -or $script:OutRemounts -or $script:OutputLost) {
+        $row.Status = 'WARN'
+        $notes.Add('the output drive dropped out during collection: steps marked WARN overlapped it; check the cable, port and power, and use another drive for real cases')
+    }
+    $sw.Stop(); $row.Seconds = [math]::Round($sw.Elapsed.TotalSeconds, 1)
+    $row.Note = $notes -join '; '
+    [pscustomobject]$row
+}
+$driveCheck = Get-OutputDriveCheck
+Write-Log ('[P9] Output drive check -> {0} {1}' -f $driveCheck.Status, $driveCheck.Note) $(if ($driveCheck.Status -eq 'WARN') { 'WARN' } else { 'OK' })
+$script:Results.Add($driveCheck)
+
 $EndUtc = [DateTime]::UtcNow
 
 # ===================================================================
@@ -2745,7 +2877,8 @@ WHAT IS HERE
   FileHashes.csv         SHA-256 of every collected file. Re-check one with
                          Get-FileHash <file> -Algorithm SHA256.
   ToolInventory.csv      Every tool binary used, with version, hash and signature.
-  Collection.log         The full console transcript. Search it for WARN and ERROR.
+  Collection.log         Every line the script printed, with UTC times. Search it for WARN
+                         and ERROR.
 
   Memory\       RAM image                  EventLogs\     every event log (.evtx)
   System\       host facts, drivers, USB   Disk\          raw artifacts from a shadow copy
@@ -3898,10 +4031,14 @@ if (-not $NoAnalysisReadme) {
 }
 
 Write-Log ("Collection finished: {0}" -f ($counts -join ', '))
-Stop-Transcript | Out-Null    # stop BEFORE hashing so Collection.log is final
+Add-LogLine $null    # flush any lines still held back, BEFORE hashing so Collection.log is final
+if ($script:LogPending.Count) {
+    Write-Host ("[!] {0} log line(s) could not be written to Collection.log (output drive unavailable)" -f $script:LogPending.Count) -ForegroundColor Yellow
+}
+$script:LogPath = $null    # nothing after this point goes into Collection.log (it is about to be hashed)
 
 # ===================================================================
-# HASHING (after transcript is closed)
+# HASHING (after the last write to Collection.log)
 # ===================================================================
 
 Write-Host '[*] Hashing collected files (SHA256)...'

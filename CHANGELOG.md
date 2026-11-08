@@ -7,9 +7,18 @@ All notable changes to `Collect_v3.ps1`. Format based on [Keep a Changelog](http
 ### Added
 - **`ANALYSIS_README.txt` guidance files.** At the end of a run, the collection root, each top-level output folder and each artifact folder under `Disk\` get a short plain-text file: what the files are (for example, that the `.sys` files in `Disk\SystemFiles` are the pagefile, hibernation file and swapfile, not drivers, or that the `.log` files in the BITS `Downloader` folder are database transaction files, not text logs), why they matter, how to analyze them, and links to the tools' official pages and to the user guide. 60 entries cover every folder the script can produce. They're aimed at new analysts, researchers and students who open a folder without the guide. Only folders that exist and aren't empty get a file; an existing file of the same name is never overwritten; the files are written before hashing, so they're in `FileHashes.csv`. Collect_v3 doesn't run or include any of the tools named.
 - `-NoAnalysisReadme` skips them.
+- **Output drive check.** A new last row in `CollectorResults.csv` (phase 9) reads the System and Partition event logs for disk errors on, and reconnects of, the output disk during the run. It's WARN only when there's evidence of a dropout, never on a healthy drive.
+
+### Fixed
+- **A USB output drive that dropped out for a few seconds broke the log and crashed PowerShell.** On the lab laptop the output drive disconnected and reconnected twice during test runs (disk event 51, then Partition event 1006). `Collection.log` was a `Start-Transcript` file, so it stopped at the moment of the dropout and never recovered, and powershell.exe crashed on exit with an IOException. One run also marked six steps FAIL while the drive was gone, the other none at all, though the dropout overlapped a step. Now:
+  - `Collection.log` is written line by line, and lines that can't be written are kept and written once the drive is back.
+  - Before each step, an unreachable output folder gets up to 2 minutes to come back; if it doesn't, the remaining steps are marked FAIL ("output drive unavailable") instead of each failing on its own.
+  - After each step, a reconnect (the volume's device name changes) marks that step WARN: "the output drive was disconnected and reconnected during this step; check its output".
+  - There is no transcript any more, so nothing is left to crash on exit.
 
 ### Verified
-- Against an empty copy of a real Full collection's folder tree plus the folders that collection didn't have: 69 files written, every entry matched, every tool named has a link, a second run changed nothing. Not yet verified in a live collection run.
+- READMEs: against an empty copy of a real Full collection's folder tree plus the folders that collection didn't have (69 files written, every entry matched, every tool named has a link, a second run changed nothing), and in a live Standard run (29 files, all in `FileHashes.csv`).
+- Logging and the drive watch: with a simulated dropout (a `subst` drive removed and re-created during a run of the functions) and against the real event logs of the run where the drive dropped out. Not yet verified in a live run.
 
 ## [3.4.2]
 

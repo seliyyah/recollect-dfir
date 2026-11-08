@@ -275,7 +275,7 @@ Do all analysis on your workstation, never on the suspect machine. The sections 
 | `manifest.json` / `manifest.txt` | Chain of custody: script version and its SHA-256, the parameters used, case, operator, host, OS, last boot, start and end time (UTC), time zone, shadow-copy ID (and whether it was deleted), the drive table, the tool inventory and every step's result | Attach to your case notes. `manifest.txt` is the readable summary. |
 | `FileHashes.csv` | SHA-256, size, last-write time and relative path of every collected file | Proves integrity. To re-check a file later: `Get-FileHash <file> -Algorithm SHA256` and compare. |
 | `ToolInventory.csv` | Every tool the script looked for: found or missing, path, version, SHA-256, signature status | Shows exactly which tool binaries produced the evidence |
-| `Collection.log` | The full console transcript | Troubleshooting. Search it for `WARN` and `ERROR`. |
+| `Collection.log` | Every line the script printed, with UTC timestamps. Written line by line, so it stays complete even if the output drive drops out for a moment | Troubleshooting. Search it for `WARN` and `ERROR`. |
 
 ### 7.1 `Memory\`
 
@@ -532,6 +532,7 @@ How to view them:
 | Defender section shows `0x800106ba` | The Defender service isn't running. Expected on machines with another antivirus product; recorded in `defender.txt`. |
 | A collector shows WARN | Read its Note in `CollectorResults.csv`; usually one item failed and the rest succeeded |
 | Interrupted with Ctrl+C | The shadow copy and temp link are still removed. Check with `vssadmin list shadows`. |
+| Several steps FAIL with "Could not find a part of the path 'E:\Collections\…'" or "A device which does not exist was specified", or the last row of `CollectorResults.csv`, **Output drive check**, is WARN | The **output drive dropped out** during the run: a USB drive briefly disconnected and reconnected. Windows records it as disk event 51 ("An error was detected on device … during a paging operation") and Partition event 1006. From 3.5.0 the script waits up to 2 minutes for the drive to come back, keeps every log line, marks each step that overlapped the dropout WARN ("the output drive was disconnected and reconnected during this step"), and stops running steps if the drive doesn't return. Re-collect anything the WARN steps produced if it matters. The usual cause is a bus-powered drive that doesn't get enough power, or a loose cable or port: use a powered hub, a different port or cable, or another drive (an SSD draws far less power), and don't use a drive that has dropped out for real cases. |
 | The run seems frozen: no new lines for a long time, little CPU, title bar starts with **Select** | The console window was clicked while **QuickEdit** was on, and Windows pauses any program writing to a console with an active selection. Click the window and press **Esc** or **Enter**; it resumes at once with nothing lost. From 3.4.2 the script turns QuickEdit off for its own window during the run (log line `Console QuickEdit turned off`) and restores it at the end. A host run with an older version, or a console where that can't be changed, can still freeze this way. |
 
 ---
