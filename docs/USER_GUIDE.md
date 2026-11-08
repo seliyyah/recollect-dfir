@@ -1,6 +1,6 @@
 # Collect_v3 — Windows DFIR Collection Script: User Guide
 
-**Script version:** 3.5.0  **Runs on:** Windows 10 / 11 / Server 2016+ with Windows PowerShell 5.1  **Needs:** Administrator rights
+**Script version:** 3.5.1  **Runs on:** Windows 10 / 11 / Server 2016+ with Windows PowerShell 5.1  **Needs:** Administrator rights
 
 > 🛡️ Collect_v3 is a **blue-team** tool for incident responders, forensic analysts and researchers. It orchestrates freely available forensic tools, and their authors are credited in the [README](../README.md#credits). Please read [Purpose and responsible use](../README.md#purpose-and-responsible-use) before using it on a real case.
 
@@ -503,7 +503,7 @@ Browser evidence lands in up to four places. **Start with the parsed CSVs, then 
 | Firefox | `Roaming\Mozilla\Firefox\Profiles\<profile>\` | `places.sqlite` (history and bookmarks), `downloads.sqlite` / `places.sqlite` downloads, `sessionstore*` (open tabs), `extensions.json` |
 | IE / legacy Edge | `Local\Microsoft\Windows\WebCache\` | `WebCacheV01.dat` (ESE database: history, cache, cookies index) |
 
-**Not collected, on purpose:** `Cookies`, `Login Data` (saved passwords), `Web Data` (autofill and cards), Firefox `key4.db`, `logins.json` and `formhistory.sqlite`.
+**Not collected by Collect_v3's own browser step, on purpose:** `Cookies`, `Login Data` (saved passwords), `Web Data` (autofill and cards), Firefox `key4.db`, `logins.json` and `formhistory.sqlite`. KAPE's copy in the Full profile does include most of them (point 3 and section 7.14).
 
 How to view them:
 - **SQLite files** (`History`, `places.sqlite`, `Favicons`, ...): **DB Browser for SQLite**, opened read-only (tick *Read Only* in the open dialog). Chrome times are microseconds since 1601-01-01 UTC. Firefox times are microseconds since 1970-01-01 UTC.
@@ -511,9 +511,38 @@ How to view them:
 - **`WebCacheV01.dat`:** NirSoft BrowsingHistoryView, or an ESE database viewer. Nothing in the script parses this file.
 - **Recovering cleared history:** a cleared `History` database often still holds deleted records in free pages. Specialist SQLite carving tools can recover them, and so can the shadow-copy versions from KAPE (point 3).
 
-**3. KAPE's copy (Full):** `KAPE\Targets\C\Users\<user>\AppData\Local\Google\Chrome\User Data\` and `...\Microsoft\Edge\User Data\`. This is KAPE's own raw copy. With `-KapeVss`, older versions from each shadow copy are in `KAPE\Targets\VSS<n>\Users\...`, which is the best way to see history that was later cleared. `KAPE\Modules\SQLDatabases\` may be empty; use `Parsed\SQLECmd\` for parsed output.
+**3. KAPE's copy (Full):** `KAPE\Targets\C\Users\<user>\AppData\Local\Google\Chrome\User Data\` and `...\Microsoft\Edge\User Data\`. This is KAPE's own raw copy. ⚠ **Unlike Collect_v3's own copy, it includes `Login Data`, `Cookies`, `Web Data` and the user's DPAPI master keys: see section 7.14.** With `-KapeVss`, older versions from each shadow copy are in `KAPE\Targets\VSS<n>\Users\...`, which is the best way to see history that was later cleared. `KAPE\Modules\SQLDatabases\` may be empty; use `Parsed\SQLECmd\` for parsed output.
 
 **4. Velociraptor (Full):** `Velociraptor\Windows.Applications.Chrome.History.zip`, `...Edge.History.zip`, `...Chrome.Extensions.zip`, `...Firefox.History.zip` and `...Firefox.Downloads.zip`. These are parsed independently of SQLECmd, with times in **UTC**. Import them with `Server.Utils.ImportCollection` (section 7.12).
+
+### 7.14 Outputs that can contain passwords and other secrets
+
+> ⚠ **CAUTION: a collection can contain working credentials.** Collect_v3's own collectors don't copy browser passwords, cookies, autofill, SSH private keys or the secret-bearing configs of remote-access and transfer tools (those are recorded as presence and hash only). **But several outputs hold, or can hold, passwords, password hashes, keys or session tokens by their nature, and the Full profile's KAPE triage copies browser password stores outright.** Anyone with a copy of the collection may be able to log in as the machine's users, its service accounts or, through shared passwords, other machines. **Treat every collection as sensitive:** use `-Archive -ArchivePassword`, keep it on access-controlled storage, share it only with people working the case, never upload it or files from it to public services, and dispose of it under your organization's evidence policy.
+
+**Contain credential material by design:**
+
+| Output | What it can hold | Collected by | Profile |
+|---|---|---|---|
+| `Memory\*.raw` | **Everything in RAM:** LSASS password hashes and Kerberos tickets, clear-text passwords when WDigest is on, browser session tokens, decrypted data, keys | `-Memory` | any, opt-in |
+| `Disk\SystemFiles\` (`hiberfil_C.sys`, `pagefile_C.sys`, `swapfile_C.sys`) | **The same as memory**, from earlier points in time | RawCopy | Full |
+| `Disk\Windows\System32\config\` (`SAM`, `SECURITY`, `SYSTEM`, `SOFTWARE`) | **Local account password hashes (NTLM), LSA secrets** (service-account passwords, the auto-logon password), **cached domain logon hashes**. SAM and SECURITY are decrypted with the boot key in SYSTEM, which is collected with them. Some machines also keep an auto-logon `DefaultPassword` in clear text in the SOFTWARE hive. | shadow-copy copy (or `reg save` fallback) | Standard and up |
+| `Disk\Windows\Panther\` | **Windows Setup answer files** (`unattend.xml`, if one was left behind): the local administrator or domain-join password, in clear text or Base64. The same image usually means the same password on every machine. | shadow-copy copy | Deep and up |
+| `KAPE\Targets\` | **KAPE's `!SANS_Triage` browser targets copy what Collect_v3's own collectors skip:** Chrome, Edge and Brave `Login Data` (saved passwords), `Cookies` and `Web Data` (autofill, saved cards); Firefox `logins.json`, `signons.sqlite` and `cookies.sqlite`; and each user's **DPAPI master keys** (`AppData\Roaming\Microsoft\Protect\`), which with the user's password or the collected hives can decrypt those saved passwords. Its remote-admin targets copy AnyDesk `*.conf` (unattended-access password hash) and mRemoteNG `confCons.xml` (saved connection passwords, often encrypted with a publicly known default key). Also the same SAM and SECURITY hives. Verified in a real Full collection. | KAPE | Full |
+| `Security\DefenderQuarantine\` | Quarantined files, which can include **credential dumps** (for example an LSASS dump Defender caught) | `-DefenderQuarantine` | opt-in |
+
+**Can contain secrets, depending on what users and attackers did:**
+
+| Output | What it can hold | Profile |
+|---|---|---|
+| `Disk\Users\<u>\...\PSReadLine\ConsoleHost_history.txt`, PowerShell transcripts | Passwords typed into commands (`net user … <password>`, `ConvertTo-SecureString -AsPlainText`, connection strings) | Standard and up |
+| `EventLogs\`, `Processes\processes.csv`, `Processes\tasklist.txt`, Velociraptor `Pslist` | Command lines and PowerShell script blocks (event 4104) that include passwords or tokens | Quick and up (event log copies: Standard and up; Velociraptor: Full) |
+| Browser `History`, `Sessions\`, Firefox `sessionstore`, `WebCache\` | Session tokens and credentials embedded in URLs; Firefox session files can include session cookies and form contents for restoring tabs | Deep and up |
+| Notepad `TabState\`, Sticky Notes `plum.sqlite` | Whatever the user typed, including passwords kept "temporarily" | Deep and up |
+| `Notifications\wpndatabase.db` | Message previews, including one-time sign-in codes | Deep and up |
+| RDP bitmap cache, `thumbcache_*.db` | Pictures of screens and images, which can show passwords | Deep and up |
+| bulk_extractor output (section 10) | Carved URLs, emails, JSON and packets from memory: session tokens and credentials in URLs | your own runs |
+
+`Security\credential_metadata.txt` lists stored credential **names** (`cmdkey /list`) and Kerberos ticket **metadata** (`klist`) only, never the secrets, and `Network\net_extra.txt` lists Wi-Fi profile names without keys.
 
 ---
 

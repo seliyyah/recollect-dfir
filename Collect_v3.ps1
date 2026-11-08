@@ -62,7 +62,7 @@
                               analyze them and links to the tools' official pages. Collect_v3 runs none of those tools.
 
 .NOTES
-    Version : 3.5.0
+    Version : 3.5.1
     Tested  : syntax-targeted at Windows PowerShell 5.1 (the common endpoint default).
     VERIFY  : Command-line syntax for third-party tools (memory imagers, RawCopy, Zimmerman tools,
               KAPE, Velociraptor) changes between versions. Test each against the exact versions
@@ -118,7 +118,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Continue'
 $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
 
-$ScriptVersion  = '3.5.0'
+$ScriptVersion  = '3.5.1'
 $ScriptStartUtc = [DateTime]::UtcNow
 $Inv            = [Globalization.CultureInfo]::InvariantCulture
 
@@ -2900,6 +2900,11 @@ WHERE TO START
 HANDLING
   This folder is evidence. Work on a copy and keep FileHashes.csv with it. Look up hashes,
   IP addresses and domains on public services; don't upload files from the case.
+  CAUTION: it can contain working credentials. The memory image, pagefile and hibernation
+  file, the SAM and SECURITY hives, any Windows Setup answer file and, in the Full profile,
+  KAPE's browser copies (saved passwords, cookies, DPAPI keys) hold passwords, hashes or
+  tokens. Keep it on access-controlled storage and archive it with a password. Full list:
+  user guide section 7.14.
 '@ }
 
 @{ Paths = @('Memory'); Guide = '7.1 and 10'
@@ -2907,6 +2912,8 @@ HANDLING
 WHAT IS HERE
   <COMPUTER>_<time>.raw  A full image of physical memory (about the size of the installed RAM).
   acquisition.log        Output of the memory acquisition tool.
+  CAUTION: the image holds credentials (LSASS password hashes, Kerberos tickets, clear-text
+  passwords when WDigest is on, session tokens). Handle it as sensitive.
 
 WHY IT MATTERS
   Memory holds what the disk doesn't: running and recently exited processes, network
@@ -3127,6 +3134,7 @@ WHAT IS HERE
   swapfile_C.sys   The paging file for Store (UWP) apps.
   Despite the .sys extension these are NOT drivers. They have no file structure to open by
   double-clicking.
+  CAUTION: like a memory image, they can hold passwords, hashes and session tokens.
 
 WHY IT MATTERS
   They hold memory from before the RAM image was taken: processes that have exited, command
@@ -3440,6 +3448,10 @@ HOW TO ANALYZE
    Tools = @('Notepad++', 'Event Viewer'); Text = @'
 WHAT IS HERE
   Windows Setup logs: setupact.log, setuperr.log, diagerr.xml, diagwrn.xml and setup.etl.
+  CAUTION: if Windows left an answer file here (unattend.xml or similar), it can hold the
+  local administrator or domain-join password in clear text or Base64. That password is
+  often the same on every machine built from the same image. Handle it as sensitive; its
+  <Password> sections, account names and FirstLogonCommands are worth reviewing.
 
 WHY IT MATTERS
   They date Windows installs and feature upgrades. An upgrade resets the timestamps of many
@@ -3928,6 +3940,10 @@ WHAT IS HERE
   Targets_<X>\       Extra internal drives.
   Modules\<Category>\  !EZParser CSV output, sorted by category.
   kape_console.log   The full KAPE log.
+  CAUTION: unlike Collect_v3's own collectors, KAPE's browser targets copy saved-password
+  stores (Chrome and Edge "Login Data", Firefox logins.json), cookies, autofill ("Web Data")
+  and each user's DPAPI master keys (AppData\Roaming\Microsoft\Protect), plus SAM and
+  SECURITY. Handle this folder as sensitive.
 
 WHY IT MATTERS
   A second, independent triage, plus the USN journal and shadow-copy versions that the

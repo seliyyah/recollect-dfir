@@ -2,6 +2,13 @@
 
 All notable changes to `Collect_v3.ps1`. Format based on [Keep a Changelog](https://keepachangelog.com/); versions follow [Semantic Versioning](https://semver.org/).
 
+## [3.5.1]
+
+### Documentation
+- **New user guide section 7.14, "Outputs that can contain passwords and other secrets",** with a bold caution and two tables: outputs that hold credential material by design (memory image; pagefile, hibernation file and swapfile; the SAM, SECURITY, SYSTEM and SOFTWARE hives; Windows Setup answer files in `Panther`; KAPE's Full-profile copy; the opt-in Defender quarantine) and outputs that can hold secrets depending on what users and attackers did (PowerShell history and transcripts, command lines in event logs and process lists, URLs and session files, Notepad tabs and Sticky Notes, notifications, screen and thumbnail caches, bulk_extractor output).
+- **Corrected: KAPE's `!SANS_Triage` in the Full profile copies browser password stores.** Its browser targets take Chrome, Edge and Brave `Login Data`, `Cookies` and `Web Data`, Firefox `logins.json`, `signons.sqlite` and `cookies.sqlite`, and each user's DPAPI master keys; its remote-admin targets take AnyDesk `*.conf` and mRemoteNG `confCons.xml`. Confirmed in a real Full collection. The README's "never collected" line was only true of Collect_v3's own collectors; it now says so, with a caution box linking to section 7.14, and the browser section notes the difference.
+- `ANALYSIS_README.txt` files for the collection root, `Memory\`, `Disk\SystemFiles\`, `Disk\Windows\Panther\` and `KAPE\` now carry a one-line caution about the credentials they can hold. Windows Setup answer files are still collected, since they can matter to the investigation.
+
 ## [3.5.0]
 
 ### Added
