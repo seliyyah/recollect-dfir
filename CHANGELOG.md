@@ -2,6 +2,16 @@
 
 All notable changes to `Collect_v3.ps1`. Format based on [Keep a Changelog](https://keepachangelog.com/); versions follow [Semantic Versioning](https://semver.org/).
 
+## [3.6.0]
+
+### Changed
+- **License changed from MIT to BSD 3-Clause.** Both licenses let anyone use, copy, modify and share the script; BSD 3-Clause states the redistribution conditions (keep the copyright notice, conditions and disclaimer with source copies, reproduce them in the documentation of other forms) and adds that the author's name may not be used to endorse derived products. The license text is also embedded in the script, and the script header carries the copyright and SPDX lines.
+- **Every run now asks you to agree to the license terms first.** The script shows the BSD 3-Clause license and an authorized-use notice and asks "Do you agree to these terms? [y/N]"; any answer but yes ends the run before anything is collected or written. **`-AcceptLicense`** (new) records agreement without the prompt. **A `-NonInteractive` run now needs `-AcceptLicense`**, or it stops at once: add it to existing launch commands and scripts. The acceptance (method and UTC time) is recorded in `Collection.log`, `manifest.json` (`Script.LicenseAccepted`) and `manifest.txt`.
+
+### Documentation
+- README: new License, "Sharing and redistributing" and Disclaimer sections covering links, copies (forks, toolkit drives, zips), other forms, the no-endorsement condition, and prepared toolkit drives that also hold third-party tools. The note that third-party tools aren't included now says that several, not all, of their licenses forbid redistribution.
+- User guide: the launch commands add `-AcceptLicense`; section 1 explains the prompt; section 5 lists the parameter.
+
 ## [3.5.1]
 
 ### Documentation

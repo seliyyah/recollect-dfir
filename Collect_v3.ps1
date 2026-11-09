@@ -25,8 +25,15 @@
 
     Run from an elevated prompt, ideally from removable media or a network share:
       powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect_v3.ps1 `
-          -CollectionProfile Standard -CaseId IR-2026-001 -OutputPath X:\Collections -NonInteractive
+          -CollectionProfile Standard -CaseId IR-2026-001 -OutputPath X:\Collections -NonInteractive -AcceptLicense
 
+    License terms: every run first shows the BSD 3-Clause license (with its warranty disclaimer) and an
+    authorized-use notice, and asks "Do you agree to these terms? [y/N]". Anything but y/yes ends the run before
+    anything is collected or written. -AcceptLicense records agreement without the prompt (required with
+    -NonInteractive).
+
+.PARAMETER AcceptLicense      Agree to the license terms and authorized-use notice without being prompted. Required
+                              with -NonInteractive. Recorded in Collection.log and the manifest.
 .PARAMETER CollectionProfile  Quick | Standard | Deep | Full. Prompted for if omitted (unless -NonInteractive).
 .PARAMETER OutputPath         Base folder for collections. Default: <toolkit>\Collections.
 .PARAMETER ToolsPath          Folder searched for tools. Default: <toolkit>\Tools if present, else <toolkit>.
@@ -62,7 +69,9 @@
                               analyze them and links to the tools' official pages. Collect_v3 runs none of those tools.
 
 .NOTES
-    Version : 3.5.1
+    Version : 3.6.0
+    License : BSD 3-Clause (SPDX-License-Identifier: BSD-3-Clause). Copyright (c) 2026, seliyyah-dfir.
+              See LICENSE. Provided "as is", without warranty of any kind.
     Tested  : syntax-targeted at Windows PowerShell 5.1 (the common endpoint default).
     VERIFY  : Command-line syntax for third-party tools (memory imagers, RawCopy, Zimmerman tools,
               KAPE, Velociraptor) changes between versions. Test each against the exact versions
@@ -81,6 +90,7 @@ param(
     [string]$CaseId = 'NOCASE',
     [string]$Operator = ('{0}\{1}' -f $env:USERDOMAIN, $env:USERNAME),
     [switch]$NonInteractive,
+    [switch]$AcceptLicense,                       # agree to the license terms without the prompt
     [switch]$Memory,
     [switch]$AllowSystemDrive,
     [string[]]$Volumes,
@@ -118,7 +128,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Continue'
 $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
 
-$ScriptVersion  = '3.5.1'
+$ScriptVersion  = '3.6.0'
 $ScriptStartUtc = [DateTime]::UtcNow
 $Inv            = [Globalization.CultureInfo]::InvariantCulture
 
@@ -290,6 +300,70 @@ function Invoke-External {
 # ===================================================================
 # PREFLIGHT
 # ===================================================================
+
+# --- License terms: agreed before anything else runs ---
+# Nothing has been collected or written yet at this point; the log line is kept in memory and written to
+# Collection.log once the collection folder exists. The text is embedded so it travels with the script even when
+# the script is copied without its LICENSE file.
+$LicenseText = @'
+Collect_v3 - Windows DFIR collection script
+BSD 3-Clause License
+
+Copyright (c) 2026, seliyyah-dfir
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+AUTHORIZED USE: run this software only on systems you own or have written
+authorization to examine. You are solely responsible for having the legal
+authority to collect data from the system, and for storing, transferring and
+destroying what it collects lawfully. The third-party tools it runs are not
+part of this software and are used under their own licenses.
+'@
+$script:LicenseAccepted = $null
+if ($AcceptLicense) {
+    $script:LicenseAccepted = [ordered]@{ Method = '-AcceptLicense parameter'; Utc = (Get-UtcStamp) }
+}
+elseif ($NonInteractive) {
+    Write-Host $LicenseText
+    Write-Log 'The license terms above must be accepted: add -AcceptLicense to run with -NonInteractive. Nothing was collected.' 'ERROR'
+    exit 1
+}
+else {
+    Write-Host ''
+    Write-Host $LicenseText
+    Write-Host ''
+    $answer = Read-Host 'Do you agree to these terms? [y/N]'
+    if ($answer -notmatch '^\s*(y|yes)\s*$') {
+        Write-Host 'Terms not accepted. Exiting; nothing was collected.' -ForegroundColor Yellow
+        exit 1
+    }
+    $script:LicenseAccepted = [ordered]@{ Method = 'interactive prompt'; Utc = (Get-UtcStamp) }
+}
+Write-Log ('License terms (BSD 3-Clause and authorized-use notice) accepted by {0} via {1}' -f $Operator, $script:LicenseAccepted.Method)
 
 if (-not (Test-IsAdmin)) {
     Write-Log 'This script must run from an elevated (Administrator) session.' 'ERROR'; exit 1
@@ -2726,6 +2800,8 @@ Set-ManifestField $mScript 'Name'       { Split-Path -Leaf $PSCommandPath }
 Set-ManifestField $mScript 'Version'    { $ScriptVersion }
 Set-ManifestField $mScript 'SHA256'     { $scriptSha }
 Set-ManifestField $mScript 'Parameters' { $bound }
+Set-ManifestField $mScript 'License'    { 'BSD-3-Clause' }
+Set-ManifestField $mScript 'LicenseAccepted' { $script:LicenseAccepted }
 
 $mCase = New-Object System.Collections.Specialized.OrderedDictionary
 Set-ManifestField $mCase 'CaseId'   { $CaseId }
@@ -2785,6 +2861,7 @@ $counts = $script:Results | Group-Object Status | ForEach-Object { '{0}={1}' -f 
 @(
     "Collect_v3 $ScriptVersion  (script SHA256 $scriptSha)"
     "Case: $CaseId   Operator: $Operator"
+    "License: BSD-3-Clause; terms accepted $($script:LicenseAccepted.Utc) via $($script:LicenseAccepted.Method)"
     "Host: $HostName   Profile: $CollectionProfile"
     "Start (UTC): $startIso"
     "End   (UTC): $endIso   Local TZ: $([TimeZoneInfo]::Local.Id)"

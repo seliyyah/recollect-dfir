@@ -1,6 +1,6 @@
 # Collect_v3 — Windows DFIR Collection Script: User Guide
 
-**Script version:** 3.5.1  **Runs on:** Windows 10 / 11 / Server 2016+ with Windows PowerShell 5.1  **Needs:** Administrator rights
+**Script version:** 3.6.0  **Runs on:** Windows 10 / 11 / Server 2016+ with Windows PowerShell 5.1  **Needs:** Administrator rights
 
 > 🛡️ Collect_v3 is a **blue-team** tool for incident responders, forensic analysts and researchers. It orchestrates freely available forensic tools, and their authors are credited in the [README](../README.md#credits). Please read [Purpose and responsible use](../README.md#purpose-and-responsible-use) before using it on a real case.
 
@@ -18,34 +18,36 @@ cd X:\Toolkit
 
 **Step 2: run ONE of these.** Change `-CaseId` to your own case number.
 
+> **License terms.** Every run starts by showing the license (BSD 3-Clause, including its "as is" warranty disclaimer) and an authorized-use notice, and asks **"Do you agree to these terms? [y/N]"**. Type `y` to continue. Any other answer ends the run before anything is collected or written. The commands below add `-AcceptLicense`, which records your agreement without the prompt; it's required with `-NonInteractive`, and a `-NonInteractive` run without it stops at once. Either way, the acceptance (how and when, in UTC) is recorded in `Collection.log`, `manifest.json` and `manifest.txt`. Read the terms once in [LICENSE](../LICENSE) or by running the script without `-AcceptLicense`.
+
 **Full collection with memory (recommended, collects everything):**
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect_v3.ps1 -CollectionProfile Full -Memory -CaseId IR-001 -NonInteractive
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect_v3.ps1 -CollectionProfile Full -Memory -CaseId IR-001 -NonInteractive -AcceptLicense
 ```
 
 **Full, plus everything KAPE can find in older shadow copies (slower, much bigger):**
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect_v3.ps1 -CollectionProfile Full -Memory -KapeVss -CaseId IR-001 -NonInteractive
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect_v3.ps1 -CollectionProfile Full -Memory -KapeVss -CaseId IR-001 -NonInteractive -AcceptLicense
 ```
 
 **Deep (no KAPE or Velociraptor; about 30–40 minutes):**
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect_v3.ps1 -CollectionProfile Deep -Memory -CaseId IR-001 -NonInteractive
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect_v3.ps1 -CollectionProfile Deep -Memory -CaseId IR-001 -NonInteractive -AcceptLicense
 ```
 
 **Standard (registry, event logs, Prefetch and the core live tools; about 10 minutes):**
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect_v3.ps1 -CollectionProfile Standard -CaseId IR-001 -NonInteractive
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect_v3.ps1 -CollectionProfile Standard -CaseId IR-001 -NonInteractive -AcceptLicense
 ```
 
 **Quick (volatile state only; 2–3 minutes):**
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect_v3.ps1 -CollectionProfile Quick -CaseId IR-001 -NonInteractive
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect_v3.ps1 -CollectionProfile Quick -CaseId IR-001 -NonInteractive -AcceptLicense
 ```
 
 **Interactive (the script asks you which profile to use):**
@@ -196,6 +198,7 @@ The 3.4 additions haven't been timed on the lab laptop yet. Allow some extra tim
 | `-ToolsPath` | Where to look for tools | `<toolkit>\Tools` |
 | `-Memory` | Take a RAM image first | off |
 | `-NonInteractive` | Never prompt (stops instead of asking) | off |
+| `-AcceptLicense` | Agree to the license terms and authorized-use notice without the prompt. **Required with `-NonInteractive`.** Recorded in the log and manifest | off (you're asked) |
 | `-AllowSystemDrive` | Allow output on C: or another internal disk (**not recommended**) | off |
 | `-Volumes D:,F:` | Collect exactly these extra drives | auto-detect internal drives |
 | `-SystemDriveOnly` | Don't collect extra internal drives | off |

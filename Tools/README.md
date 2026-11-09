@@ -1,6 +1,6 @@
 # Tools folder
 
-Put the third-party tools here. They are **not** stored in this repository (their licenses don't allow redistribution, and they're large), so everything in this folder except this README is git-ignored.
+Put the third-party tools here. They are **not** stored in this repository (several of their licenses, including Sysinternals' and KAPE's, don't allow redistribution, and they're large), so everything in this folder except this README is git-ignored.
 
 The script searches this folder **recursively by file name**, so subfolder names don't matter. **Extract each tool's whole folder**, not just the `.exe`: several tools need the files that ship beside them (Maps, batch files, DLLs).
 

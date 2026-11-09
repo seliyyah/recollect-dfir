@@ -2,7 +2,7 @@
 
 A single PowerShell script that collects forensic evidence from a live Windows machine, in order of volatility. It drives the standard free DFIR toolset (Sysinternals, Eric Zimmerman's tools, KAPE, Velociraptor, WinPmem / Magnet RAM Capture / DumpIt, RawCopy) and writes a hashed, self-documenting collection: a manifest, per-step results, and SHA-256 hashes of every file.
 
-![PowerShell 5.1](https://img.shields.io/badge/PowerShell-5.1-blue) ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011%20%7C%20Server-informational) ![Version](https://img.shields.io/badge/version-3.5.1-green) ![License: MIT](https://img.shields.io/badge/license-MIT-yellow)
+![PowerShell 5.1](https://img.shields.io/badge/PowerShell-5.1-blue) ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011%20%7C%20Server-informational) ![Version](https://img.shields.io/badge/version-3.6.0-green) ![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue)
 
 > 🛡️ **A blue-team tool** for incident responders, forensic analysts and researchers. Use it only on systems you own or are authorized to examine. See [Purpose and responsible use](#purpose-and-responsible-use).
 
@@ -15,7 +15,7 @@ A single PowerShell script that collects forensic evidence from a live Windows m
 
 ```powershell
 cd X:\Toolkit
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect_v3.ps1 -CollectionProfile Full -Memory -CaseId IR-001 -NonInteractive
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect_v3.ps1 -CollectionProfile Full -Memory -CaseId IR-001 -NonInteractive -AcceptLicense
 ```
 
 Results go to `X:\Toolkit\Collections\<CaseId>_<COMPUTER>_<UTC time>\`. Use `-OutputPath` to send them elsewhere. **Never write output to the suspect machine's internal disks.**
@@ -52,7 +52,7 @@ Opt-in extras: `-YaraRules <file.yar>` (process-memory YARA scan, Full), `-LolDr
 
 - Windows 10 / 11 / Server 2016+, **Windows PowerShell 5.1**, Administrator rights.
 - An external drive with enough free space (Full + Memory on a 32 GB RAM laptop is about 72 GB).
-- The third-party tools, which you download yourself (they are **not** included in this repository because their licenses don't allow redistribution). See [Tools/README.md](Tools/README.md).
+- The third-party tools, which you download yourself (they are **not** included in this repository: several of their licenses don't allow redistribution, and they're large). See [Tools/README.md](Tools/README.md).
 
 ## Repository layout
 
@@ -61,7 +61,7 @@ Opt-in extras: `-YaraRules <file.yar>` (process-memory YARA scan, Full), `-LolDr
 ├── Collect_v3.ps1        # the collector (must stay next to the Tools folder)
 ├── README.md
 ├── CHANGELOG.md
-├── LICENSE               # MIT
+├── LICENSE               # BSD 3-Clause
 ├── docs/
 │   ├── USER_GUIDE.md     # full operator guide and output reference
 │   └── DEVELOPMENT.md    # architecture, coding rules, testing, known issues
@@ -116,8 +116,22 @@ All product names and trademarks belong to their respective owners. Their mentio
 
 ## License
 
-Released under the [MIT License](LICENSE). You're free to use, modify and share it, including commercially, as long as the copyright notice is kept. The license covers only this repository's own files, not the third-party tools above, which keep their own licenses.
+Collect_v3 is released under the **[BSD 3-Clause License](LICENSE)**. Copyright (c) 2026, seliyyah-dfir.
+
+The license covers only this repository's own files (the script and its documentation). The third-party tools credited above are not part of it: each keeps its own license, and some (Sysinternals, KAPE) don't allow redistribution at all.
+
+**Every run asks you to agree to the license terms first.** The script shows the license and an authorized-use notice and asks "Do you agree to these terms? [y/N]"; any answer but yes ends the run before anything is collected. `-AcceptLicense` records agreement without the prompt and is required with `-NonInteractive`. The acceptance is written to `Collection.log` and the manifest.
+
+### Sharing and redistributing
+
+You may use, copy, modify and share Collect_v3, including commercially and inside your organization, under these conditions:
+
+- **Sharing a link** to this repository needs nothing more: the license travels with it.
+- **Copying it** (a fork, a toolkit drive handed to a colleague, a zip on a file share, a script inside your own toolkit): keep the [LICENSE](LICENSE) file with it, and keep the copyright and license lines in the script's header. If you change the script, keep those notices; please also say that your copy is modified, so problems aren't reported against the original.
+- **Distributing it in another form** (compiled, packaged or bundled into another product): reproduce the copyright notice, the license conditions and the disclaimer in the documentation or other materials that ship with it.
+- **No endorsement:** don't use the author's or contributors' names to promote anything derived from it without written permission.
+- **A prepared toolkit drive** that also holds the third-party tools is a redistribution of those tools too. Include each tool's own license, and leave out the tools whose licenses forbid redistribution (Sysinternals, KAPE): the recipient downloads those from the official source.
 
 ## Disclaimer
 
-Provided as-is, without warranty of any kind. The authors are not responsible for misuse or for any damage or data loss arising from its use. You are responsible for having legal authority to collect data from any system you run it on.
+**THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.** As the license states in full, the copyright holder and contributors are not liable for any damages, including data loss, business interruption or legal consequences, arising in any way from its use or from anyone's redistribution of it. You alone are responsible for having the legal authority to collect data from any system you run it on, for how you use it, and for handling what it collects lawfully.
