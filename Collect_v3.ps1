@@ -69,7 +69,7 @@
                               analyze them and links to the tools' official pages. Collect_v3 runs none of those tools.
 
 .NOTES
-    Version : 3.6.0
+    Version : 3.6.1
     License : BSD 3-Clause (SPDX-License-Identifier: BSD-3-Clause). Copyright (c) 2026, seliyyah-dfir.
               See LICENSE. Provided "as is", without warranty of any kind.
     Tested  : syntax-targeted at Windows PowerShell 5.1 (the common endpoint default).
@@ -128,7 +128,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Continue'
 $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
 
-$ScriptVersion  = '3.6.0'
+$ScriptVersion  = '3.6.1'
 $ScriptStartUtc = [DateTime]::UtcNow
 $Inv            = [Globalization.CultureInfo]::InvariantCulture
 
@@ -166,7 +166,8 @@ $script:LogPath    = $null
 $script:LogPending = New-Object System.Collections.Generic.List[string]
 function Add-LogLine {
     param([string]$Line)
-    if ($null -ne $Line) { $script:LogPending.Add($Line) }
+    # A [string] parameter turns $null into '', so test for empty: Add-LogLine $null only flushes.
+    if (-not [string]::IsNullOrEmpty($Line)) { $script:LogPending.Add($Line) }
     if (-not $script:LogPath -or -not $script:LogPending.Count) { return }
     try {
         [IO.File]::AppendAllText($script:LogPath, (($script:LogPending -join "`r`n") + "`r`n"), [Text.Encoding]::UTF8)
@@ -541,9 +542,11 @@ foreach ($f in 'Memory', 'System', 'Network', 'Processes', 'Persistence', 'Secur
     New-Item -ItemType Directory -Force -Path (Join-Path $CollectionRoot $f) | Out-Null
 }
 
+# The header goes first, ahead of lines logged before the folder existed (such as the license acceptance).
+$script:LogPending.Insert(0, ('Collect_v3 log | started {0} | {1} | user {2}\{3} | PowerShell {4} | PID {5}' -f (Get-UtcStamp),
+    $HostName, $env:USERDOMAIN, $env:USERNAME, $PSVersionTable.PSVersion, $PID))
 $script:LogPath = Join-Path $CollectionRoot 'Collection.log'
-Add-LogLine ('Collect_v3 log | started {0} | {1} | user {2}\{3} | PowerShell {4} | PID {5}' -f (Get-UtcStamp), $HostName,
-    $env:USERDOMAIN, $env:USERNAME, $PSVersionTable.PSVersion, $PID)
+Add-LogLine $null
 
 # Output drive watch. The NT device behind the output drive letter (\Device\HarddiskVolumeN) gets a new number when
 # the drive is disconnected and reconnected, even for a few seconds, so comparing it after each step shows which

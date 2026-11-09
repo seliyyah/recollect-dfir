@@ -2,6 +2,16 @@
 
 All notable changes to `Collect_v3.ps1`. Format based on [Keep a Changelog](https://keepachangelog.com/); versions follow [Semantic Versioning](https://semver.org/).
 
+## [3.6.1]
+
+### Fixed
+- `Collection.log` started with the license-acceptance line instead of the `Collect_v3 log | started` header (the acceptance is logged before the collection folder exists). The header is now always the first line.
+- `Collection.log` ended with an empty line: the final flush passed `$null`, which a `[string]` parameter turns into an empty string that was then written. Flushing no longer adds a line.
+
+### Verified
+- The 3.6.0 license prompt in a live elevated Quick run: typed `y`, and the acceptance (method and UTC time) was in `Collection.log`, `manifest.txt` and `manifest.json`; 28 OK, 1 expected skip.
+- Both fixes with the script's own logging functions against a temporary log folder.
+
 ## [3.6.0]
 
 ### Changed
