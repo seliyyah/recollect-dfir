@@ -2,6 +2,29 @@
 
 All notable changes to `Collect_v3.ps1`. Format based on [Keep a Changelog](https://keepachangelog.com/); versions follow [Semantic Versioning](https://semver.org/).
 
+## [3.7.0]
+
+### Added
+- **`System\command_history.csv` (Standard and up):** every command from every collected command-history file, one row per command, with the account, source, line number, the file it came from and that file's last-modified time. Multi-line PowerShell commands are joined into one row; bash times are read when `HISTTIMEFORMAT` was set; from Windows Terminal screen text only the PowerShell and CMD prompt lines are taken. Built from the copies under `Disk\`, so it works with or without the shadow copy.
+- **More command-history files are collected:**
+  - PSReadLine history for **SYSTEM** (`Windows\System32\config\systemprofile` and `SysWOW64`) and the **service accounts** (`Windows\ServiceProfiles\*`). PowerShell run through PsExec `-s`, a service or a scheduled task writes there, and it wasn't collected before.
+  - Every PSReadLine host file (`*_history.txt`), not only `ConsoleHost_history.txt`: for example `Visual Studio Code Host_history.txt`.
+  - `.bash_history` (Git Bash, MSYS2, Cygwin) and `.python_history` from each profile.
+  - Windows Terminal's saved tab text (`buffer_*.txt`), when Terminal restores previous sessions: the only place on disk where CMD commands can survive.
+  - The no-snapshot fallback copies the same files live.
+- **`EventLogs\command_events.csv` (Deep and up):** command lines from the collected event logs, sorted by time: PowerShell script blocks (4104, Windows PowerShell and PowerShell 7), the command line of every PowerShell start (Windows PowerShell 400), process creation (Security 4688, Sysmon 1) and WMI permanent event consumers (WMI-Activity 5861). Read from the collection's copies, never the live logs, with no tool needed. Rows caused by the collection itself (its own script blocks, which PowerShell logs automatically as "suspicious", and its own start) are kept but marked "from this collection run". 4104 account SIDs are translated to names.
+- `ANALYSIS_README.txt` entries for the SYSTEM and service-account PSReadLine folders and Windows Terminal's folder; the System, EventLogs, user-profile and PSReadLine entries describe the new files.
+
+### Changed
+- The "user hives + PowerShell history" step is now "user hives"; the histories have their own step.
+
+### Documentation
+- User guide: new section 7.15, "Command-line activity: where commands are recorded" (including CMD, which keeps no history file, only `conhost.exe` memory); sections 4, 7.2, 7.7, 7.8, the quick reference and 7.14 list the new files.
+
+### Verified
+- Both CSVs built from a real Full collection's copies: 198 history lines gave 190 commands (5 multi-line commands joined); 524 event rows (450 script blocks, 74 PowerShell starts), of which 434 were correctly marked as the collector's own. - The copy step and `command_history.csv` against a constructed snapshot: SYSTEM, 32-bit SYSTEM and NetworkService histories attributed to the right account, a VS Code host file included and an unrelated file in the PSReadLine folder skipped, bash `HISTTIMEFORMAT` times attached to the right commands, Python history, and only the PowerShell and CMD prompt lines taken from Windows Terminal screen text.
+- **Not yet verified:** the 4688, Sysmon 1 and WMI-Activity 5861 rows (the lab machine has no process auditing, no Sysmon and no consumer registrations; the field names follow the published event schemas), the Windows Terminal `buffer_*.txt` file name (Terminal isn't installed on the lab machine), and a live run of the new steps.
+
 ## [3.6.1]
 
 ### Fixed

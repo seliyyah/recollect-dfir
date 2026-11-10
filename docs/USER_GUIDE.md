@@ -1,6 +1,6 @@
 # Collect_v3 — Windows DFIR Collection Script: User Guide
 
-**Script version:** 3.6.1  **Runs on:** Windows 10 / 11 / Server 2016+ with Windows PowerShell 5.1  **Needs:** Administrator rights
+**Script version:** 3.7.0  **Runs on:** Windows 10 / 11 / Server 2016+ with Windows PowerShell 5.1  **Needs:** Administrator rights
 
 > 🛡️ Collect_v3 is a **blue-team** tool for incident responders, forensic analysts and researchers. It orchestrates freely available forensic tools, and their authors are credited in the [README](../README.md#credits). Please read [Purpose and responsible use](../README.md#purpose-and-responsible-use) before using it on a real case.
 
@@ -176,8 +176,8 @@ Each profile includes everything in the profiles above it.
 | Profile | Adds | Typical time |
 |---|---|---|
 | **Quick** (1) | System time and clock, network connections (joined to processes), TCPView, DNS cache, ARP and routes, SMB sessions, named pipes, port proxies, processes (with hash, signature and owner), logon sessions, services, scheduled tasks, Run keys, WMI subscriptions, BITS, startup commands, IFEO debuggers, shadow-copy list, OS identity, local accounts, disks and BitLocker, **event log channel configuration**, **ETW sessions and AutoLogger settings**, SMB open files | 2–3 min |
-| **Standard** (2) | Creates a **shadow copy (VSS snapshot)** and copies from it: all registry hives (system, user and service accounts), Amcache, **all event logs**, Prefetch, scheduled-task XML, setupapi logs, Defender logs, BITS queue, PCA, GPO scripts, Startup folders, PowerShell history. Also: systeminfo, installed software, hotfixes, drivers (and their signatures), USB storage history, PnP devices, AppX packages, Defender, firewall and audit config, gpresult, security settings (LSA, WDigest, RDP, UAC, PowerShell logging), certificate stores, stored credential *names*, Kerberos tickets, local groups, accessibility binaries (sticky-keys check), live export of key event logs, Autoruns, Handle, ListDlls, LogonSessions. New in 3.4: **driver hashes and loaded kernel modules** (LOLDrivers-ready), code integrity / vulnerable-driver blocklist / VBS, **WFP filters**, Sysmon config, VMs and mounted disk images, service failure actions, SSH keys and configs, PowerShell transcripts, **Mark-of-the-Web** | ~10 min |
-| **Deep** (3) | SRUM, WMI repository, LNK files and Jump Lists, ActivitiesCache (Timeline), RDP bitmap cache, WER reports, Panther and debug logs, thumbcache, iconcache, WebCache, notifications, OneDrive logs, remote-access tool logs (AnyDesk, TeamViewer, RustDesk, Splashtop), browser artifacts (history, bookmarks, sessions, extensions; **not** cookies, passwords or autofill), raw `$MFT`, `$LogFile` and `$Boot`, the USN journal, Sigcheck of user-writable folders, **all Zimmerman parsers**, extra internal drives (section 5.1). New in 3.4: ScreenConnect, Atera, LogMeIn and discovered RMM agents (logs copied, configs presence-only), IIS config and web-root listing, Notepad TabState and Sticky Notes, MEGAsync logs, WFP full state, disk-image file search, **exfiltration-tool search** (rclone, MEGA, ngrok …) | 30–40 min |
+| **Standard** (2) | Creates a **shadow copy (VSS snapshot)** and copies from it: all registry hives (system, user and service accounts), Amcache, **all event logs**, Prefetch, scheduled-task XML, setupapi logs, Defender logs, BITS queue, PCA, GPO scripts, Startup folders, **command-line histories** (PowerShell for every account, including SYSTEM and the service accounts, plus bash, Python and Windows Terminal), laid out in `System\command_history.csv`. Also: systeminfo, installed software, hotfixes, drivers (and their signatures), USB storage history, PnP devices, AppX packages, Defender, firewall and audit config, gpresult, security settings (LSA, WDigest, RDP, UAC, PowerShell logging), certificate stores, stored credential *names*, Kerberos tickets, local groups, accessibility binaries (sticky-keys check), live export of key event logs, Autoruns, Handle, ListDlls, LogonSessions. New in 3.4: **driver hashes and loaded kernel modules** (LOLDrivers-ready), code integrity / vulnerable-driver blocklist / VBS, **WFP filters**, Sysmon config, VMs and mounted disk images, service failure actions, SSH keys and configs, PowerShell transcripts, **Mark-of-the-Web** | ~10 min |
+| **Deep** (3) | SRUM, WMI repository, LNK files and Jump Lists, ActivitiesCache (Timeline), RDP bitmap cache, WER reports, Panther and debug logs, thumbcache, iconcache, WebCache, notifications, OneDrive logs, remote-access tool logs (AnyDesk, TeamViewer, RustDesk, Splashtop), browser artifacts (history, bookmarks, sessions, extensions; **not** cookies, passwords or autofill), raw `$MFT`, `$LogFile` and `$Boot`, the USN journal, Sigcheck of user-writable folders, **all Zimmerman parsers**, extra internal drives (section 5.1). New in 3.4: ScreenConnect, Atera, LogMeIn and discovered RMM agents (logs copied, configs presence-only), IIS config and web-root listing, Notepad TabState and Sticky Notes, MEGAsync logs, WFP full state, disk-image file search, **exfiltration-tool search** (rclone, MEGA, ngrok …). New in 3.7: `EventLogs\command_events.csv`, every command line from the event logs (PowerShell 4104 and 400, 4688, Sysmon 1, WMI-Activity 5861) in time order | 30–40 min |
 | **Full** (4) | pagefile, hiberfil and swapfile, the full Recycle Bin, the Windows Search database, MEMORY.DMP, Sigcheck of System32, **KAPE** (`!SANS_Triage` + `!EZParser`), **Velociraptor** (23 artifacts, including browser history and RDP logon chains) | 60–100 min |
 | `-Memory` (any profile) | RAM image, taken **first**, before anything else changes memory | 4–5 min for 32 GB |
 | `-YaraRules` (Full, opt-in) | YARA scan of process memory with your rules (Velociraptor `Windows.Detection.Yara.Process`) | slow; depends on rules and process count |
@@ -250,6 +250,7 @@ Do all analysis on your workstation, never on the suspect machine. The sections 
 |---|---|---|---|
 | `CollectorResults.csv`, `manifest.txt`, `Collection.log` | Timeline Explorer (CSV), any text editor | | 7.0 |
 | `Memory\*.raw` | **Volatility 3** | **MemProcFS**; **bulk_extractor**, then **bulk-extractor-to-csv** to read its output | 7.1, 10 |
+| `System\command_history.csv`, `EventLogs\command_events.csv` | Timeline Explorer | The raw history files and `.evtx` logs they came from; section 7.15 for the other places commands are recorded | 7.15 |
 | `System\`, `Network\`, `Processes\`, `Persistence\`, `Security\` | Timeline Explorer for the CSVs; a text editor (Notepad++) for the TXT files | Hash, IP and domain lookups (see the note below the table) | 7.2–7.6 |
 | `Security\DefenderQuarantine\` | **Only in an isolated malware-analysis VM:** **maldump** or **defender-dump** to decode the samples | Your usual malware-analysis tools | 7.6 |
 | `EventLogs\All\` | `Parsed\EvtxECmd\evtx_all.csv` in Timeline Explorer | **Hayabusa** or **Chainsaw** for Sigma-rule hunting; Event Viewer for a single log | 7.7 |
@@ -306,6 +307,7 @@ Do all analysis on your workstation, never on the suspect machine. The sections 
 | `disks_bitlocker.txt` | Disks, volumes, BitLocker status |
 | `shadow_copies.txt` | Existing shadow copies. Attackers often delete them; missing copies can be a ransomware sign. |
 | `prefetch_listing.csv` | Prefetch file names with timestamps (quick view of what ran) |
+| `command_history.csv` (Standard+) | **Every command from every collected command-history file**, one row per command: `Account` (a user, `SYSTEM`, `LocalService` or `NetworkService`), `Source` (which PowerShell host, bash, Python, or Windows Terminal prompt lines), `Line`, `Command`, the `File` it came from and that file's `FileModifiedUtc`. Multi-line PowerShell commands are joined into one row. History files have no per-command times (bash has them only when `HISTTIMEFORMAT` was set): `FileModifiedUtc` dates the file's last command. **Filter `Account` for `SYSTEM`**: PowerShell run as SYSTEM usually means PsExec `-s`, a service or a scheduled task. See section 7.15. |
 
 **Tools:** Notepad++ or any text editor; CSVs in Timeline Explorer.
 
@@ -372,6 +374,7 @@ Do all analysis on your workstation, never on the suspect machine. The sections 
 |---|---|
 | `All\` | **Every** `.evtx` file, copied from the shadow copy (about 350+ files) |
 | `Live\` | Live exports of Security, System, Application, PowerShell and Sysmon (a backup copy) |
+| `command_events.csv` (Deep+) | **Command lines from the event logs, sorted by time:** PowerShell script blocks (4104, Windows PowerShell and PowerShell 7), the command line of each PowerShell start (Windows PowerShell 400: shows `-enc` encoded commands even with no other logging), process creation with command line (Security 4688, Sysmon 1), and WMI permanent event consumers (WMI-Activity 5861). Columns: `TimeUtc`, `Source`, `EventId`, `Account`, `Process`, `ParentProcess`, `Command`, `Detail`, `RecordId`, `LogFile`. A long script block spans several 4104 events: group them by the `ScriptBlockId` in `Detail`. **Rows caused by the collection itself** (Collect_v3's own script blocks, which PowerShell logs automatically as "suspicious", and its own start) are kept but marked "from this collection run" in `Detail`: filter them out. No 4688 rows, or rows without a command line, mean process auditing or its command-line option was off. |
 | `channel_config.csv` (all profiles) | Every event log channel: enabled or not, retention mode, **maximum size**, current size, record count, whether it's full, oldest record, last write. **A disabled channel, or a Security log shrunk to a tiny maximum size, is evidence of anti-forensics** even when the log itself looks clean. |
 
 **How to analyze:** Start with the parsed version, `Parsed\EvtxECmd\evtx_all.csv`, in **Timeline Explorer** (section 7.10). For a single log, double-click the `.evtx` to open it in Windows Event Viewer. For fast threat hunting, run **Hayabusa** or **Chainsaw** against the `All\` folder, for example `hayabusa csv-timeline -d "<case folder>\EventLogs\All" -o hayabusa_timeline.csv`, and open the result in Timeline Explorer.
@@ -419,6 +422,8 @@ The folder tree **mirrors the original paths** (`Disk\Windows\...` = `C:\Windows
 | `Accessibility_Binaries\` | Copies of sethc.exe / utilman.exe | Compare hashes with known-good |
 | `Volume_D\` (and so on) | Extra internal drives: `root_listing.csv`, `recyclebin_listing.csv`, `$Recycle.Bin\` | Timeline Explorer; RBCmd output |
 | `ProgramData\ssh\`, `Users\<u>\.ssh\` (Standard+) | OpenSSH `authorized_keys`, `administrators_authorized_keys`, `known_hosts`, `config`, `sshd_config`, public host keys and sshd logs. **Private keys are never copied.** A planted key is quiet persistence that Autoruns doesn't check. | Text editor: look for keys nobody recognizes |
+| `PSReadLine\*_history.txt` under `Users\<u>\AppData\Roaming\Microsoft\Windows\PowerShell\`, `Windows\System32\config\systemprofile\...` (SYSTEM), `Windows\SysWOW64\config\systemprofile\...` (SYSTEM, 32-bit PowerShell) and `Windows\ServiceProfiles\<account>\...` (Standard+) | PowerShell command history, one file per host: `ConsoleHost_history.txt` (console and Windows Terminal), `Visual Studio Code Host_history.txt` and others. The last 4096 commands by default, no timestamps. | `System\command_history.csv`; a text editor |
+| `Users\<u>\.bash_history`, `.python_history`, Windows Terminal `buffer_*.txt` (Standard+) | Git Bash, MSYS2 or Cygwin history; the Python prompt's history; Windows Terminal tab screen text (commands **and output**, saved when Terminal restores previous sessions) | `System\command_history.csv`; a text editor for the output around each command |
 | `Users\<u>\Documents\PowerShell_transcript.*.txt` (Standard+) | PowerShell transcripts from the default locations (`Documents\` and `Documents\<yyyyMMdd>\`), plus any local folder set by transcription policy. A policy folder on a network share is noted, not followed. | Text editor: full command input **and output** |
 | `zone_identifier.csv` (Standard+) | **Mark-of-the-Web** for files in each user's Downloads, Desktop, Documents, Temp and Outlook attachment cache: `ZoneId` (3 = internet), `HostUrl` (where it was downloaded from), `ReferrerUrl`. Read from the snapshot. At Deep+ risky file types up to 50 MB are hashed. Extracting a downloaded zip copies MOTW onto every file inside, so expect thousands of rows. | Timeline Explorer: filter `HostUrl` |
 | `remote_access_presence.csv` (Deep+) | Remote-access / RMM tool configs and files **recorded but not copied** (presence, size, UTC times, SHA-256): ScreenConnect `User.xml` and client `user.config`, files pushed through ScreenConnect (`Temp\ScreenConnect\<ver>\Files\`), Atera configs, AnyDesk `*.conf`, NetSupport `client32.ini` (only `GatewayAddress` / port are read out: the C2 or gateway address), MeshAgent `.msh` (only the server URL), and configs next to any MeshAgent, NetSupport, SimpleHelp, Action1 or ScreenConnect service. | Timeline Explorer |
@@ -537,8 +542,8 @@ How to view them:
 
 | Output | What it can hold | Profile |
 |---|---|---|
-| `Disk\Users\<u>\...\PSReadLine\ConsoleHost_history.txt`, PowerShell transcripts | Passwords typed into commands (`net user … <password>`, `ConvertTo-SecureString -AsPlainText`, connection strings) | Standard and up |
-| `EventLogs\`, `Processes\processes.csv`, `Processes\tasklist.txt`, Velociraptor `Pslist` | Command lines and PowerShell script blocks (event 4104) that include passwords or tokens | Quick and up (event log copies: Standard and up; Velociraptor: Full) |
+| `System\command_history.csv`, the `PSReadLine\*_history.txt` files, `.bash_history`, `.python_history`, Windows Terminal `buffer_*.txt`, PowerShell transcripts | Passwords typed into commands (`net user … <password>`, `ConvertTo-SecureString -AsPlainText`, connection strings) | Standard and up |
+| `EventLogs\` (including `command_events.csv`), `Processes\processes.csv`, `Processes\tasklist.txt`, Velociraptor `Pslist` | Command lines and PowerShell script blocks (event 4104) that include passwords or tokens | Quick and up (event log copies: Standard and up; Velociraptor: Full) |
 | Browser `History`, `Sessions\`, Firefox `sessionstore`, `WebCache\` | Session tokens and credentials embedded in URLs; Firefox session files can include session cookies and form contents for restoring tabs | Deep and up |
 | Notepad `TabState\`, Sticky Notes `plum.sqlite` | Whatever the user typed, including passwords kept "temporarily" | Deep and up |
 | `Notifications\wpndatabase.db` | Message previews, including one-time sign-in codes | Deep and up |
@@ -548,6 +553,27 @@ How to view them:
 `Security\credential_metadata.txt` lists stored credential **names** (`cmdkey /list`) and Kerberos ticket **metadata** (`klist`) only, never the secrets, and `Network\net_extra.txt` lists Wi-Fi profile names without keys.
 
 ---
+
+### 7.15 Command-line activity: where commands are recorded
+
+Commands run on a Windows machine end up in several places, and none of them is complete on its own. Start with the two CSVs; the table says where else to look.
+
+| Where | What it records | In the collection |
+|---|---|---|
+| PSReadLine history (PowerShell) | Typed commands, per account and per host; no times | `System\command_history.csv`; raw files under `Disk\` (section 7.8) |
+| PowerShell script block logging (4104) | The code that actually ran, including scripts and decoded `-enc` commands. Logged for "suspicious" code even when the policy is off | `EventLogs\command_events.csv` (Deep+); `Parsed\EvtxECmd\evtx_all.csv` |
+| Windows PowerShell 400 | The command line of every PowerShell start (`HostApplication`); on by default | `EventLogs\command_events.csv` |
+| PowerShell transcripts | Commands **and output**, when transcription is enabled | `Disk\Users\<u>\Documents\` (section 7.8) |
+| Security 4688, Sysmon 1 | Every process with its command line, **only** if process auditing with command lines, or Sysmon, was on. This is where `cmd.exe /c …`, `wmic …` and other non-PowerShell commands show up | `EventLogs\command_events.csv` |
+| WMI-Activity 5861 | WMI permanent event consumers (persistence) as they're registered, with the command they run | `EventLogs\command_events.csv`; also `Persistence\wmi_subscriptions.txt` and the WMI repository |
+| **CMD (`cmd.exe`)** | **Keeps no history file.** Its history (doskey) lives only in the memory of the `conhost.exe` process behind each console window | `Memory\*.raw` (`-Memory`): use Volatility's console plugins (check which ones your Volatility 3 version includes) or search the image for the commands. Windows Terminal's `buffer_*.txt`, when present, holds CMD prompt lines too |
+| bash, Python | Typed commands; bash adds times when `HISTTIMEFORMAT` was set | `System\command_history.csv` |
+| Registry | `RunMRU` (the Win+R box), `TypedPaths` (Explorer's address bar) | `Parsed\RECmd_Users\` |
+| Prefetch, Amcache, ShimCache | That a program ran (not its arguments) | `Parsed\PECmd`, `Parsed\Amcache`, `Parsed\AppCompatCache` |
+
+Not collected: WSL shells keep their `.bash_history` inside the distribution's virtual disk (`ext4.vhdx`), which would have to be mounted and read separately.
+
+> ⚠ Commands can contain passwords (section 7.14).
 
 ## 8. Troubleshooting
 

@@ -2,7 +2,7 @@
 
 A single PowerShell script that collects forensic evidence from a live Windows machine, in order of volatility. It drives the standard free DFIR toolset (Sysinternals, Eric Zimmerman's tools, KAPE, Velociraptor, WinPmem / Magnet RAM Capture / DumpIt, RawCopy) and writes a hashed, self-documenting collection: a manifest, per-step results, and SHA-256 hashes of every file.
 
-![PowerShell 5.1](https://img.shields.io/badge/PowerShell-5.1-blue) ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011%20%7C%20Server-informational) ![Version](https://img.shields.io/badge/version-3.6.1-green) ![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue)
+![PowerShell 5.1](https://img.shields.io/badge/PowerShell-5.1-blue) ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011%20%7C%20Server-informational) ![Version](https://img.shields.io/badge/version-3.7.0-green) ![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue)
 
 > 🛡️ **A blue-team tool** for incident responders, forensic analysts and researchers. Use it only on systems you own or are authorized to examine. See [Purpose and responsible use](#purpose-and-responsible-use).
 
@@ -43,6 +43,7 @@ Opt-in extras: `-YaraRules <file.yar>` (process-memory YARA scan, Full), `-LolDr
 - **Drive-letter independent:** finds its tools relative to its own location, collects whatever drive Windows is on, and auto-detects extra **internal** disks (USB and virtual disks are excluded).
 - **Tamper and BYOVD awareness:** records whether logging was interfered with (disabled or shrunk event-log channels, stopped ETW/AutoLogger sessions, WFP filters blocking security tools) and hashes every driver, including ones loaded with no service entry, ready for LOLDrivers matching.
 - **Careful with credentials:** Collect_v3's own collectors record configs that can hold secrets (rclone, ngrok, WinSCP, FileZilla, RMM agents, AnyDesk) as presence and hash only, and never copy SSH private keys or browser cookies, saved passwords and autofill. See the caution below.
+- **Command lines in one place:** `System\command_history.csv` lists every command from every PowerShell history file (for every account, including SYSTEM and the service accounts, which attackers using PsExec or services leave behind), plus bash, Python and Windows Terminal; at Deep, `EventLogs\command_events.csv` adds the command lines from the event logs (script blocks, PowerShell starts, process creation, WMI consumers) in time order, with the collector's own activity marked. [Section 7.15](docs/USER_GUIDE.md#715-command-line-activity-where-commands-are-recorded) maps where else commands are recorded, including CMD, which keeps no history file.
 - **Self-explaining output:** every output folder, and every artifact folder under `Disk\`, gets an `ANALYSIS_README.txt`: what the files are, why they matter, how to analyze them, and links to the tools' official pages. Written for new analysts, researchers and students; `-NoAnalysisReadme` turns it off.
 - **Smart tool handling:** finds tools by file name anywhere under `Tools\`; picks the runnable build (skips .NET builds whose runtime is missing and falls back to KAPE's bundled copies; prefers x64 over x86 and ARM64).
 

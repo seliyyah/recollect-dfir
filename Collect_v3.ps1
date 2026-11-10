@@ -13,7 +13,9 @@
                       event log channel config, ETW/AutoLogger sessions.
       Standard (2)  + VSS snapshot, registry hives, user hives, ALL event logs, prefetch, task XML,
                       Defender/firewall/system config, Autoruns, Handle, ListDlls, driver hashes + loaded
-                      kernel modules, WFP filters, Sysmon config, SSH keys, PowerShell transcripts, Mark-of-the-Web.
+                      kernel modules, WFP filters, Sysmon config, SSH keys, PowerShell transcripts, Mark-of-the-Web,
+                      command-line histories (PowerShell for every account incl. SYSTEM, bash, Python, Windows Terminal)
+                      in System\command_history.csv; Deep adds EventLogs\command_events.csv.
       Deep     (3)  + SRUM, WMI repo, LNK/JumpLists, browser history, $MFT/$J/$LogFile (raw),
                       Sigcheck on user-writable paths, and Zimmerman parsers over the collected copies.
       Full     (4)  + KAPE (targets + !EZParser modules) and Velociraptor collections, pagefile/hiberfil/
@@ -69,7 +71,7 @@
                               analyze them and links to the tools' official pages. Collect_v3 runs none of those tools.
 
 .NOTES
-    Version : 3.6.1
+    Version : 3.7.0
     License : BSD 3-Clause (SPDX-License-Identifier: BSD-3-Clause). Copyright (c) 2026, seliyyah-dfir.
               See LICENSE. Provided "as is", without warranty of any kind.
     Tested  : syntax-targeted at Windows PowerShell 5.1 (the common endpoint default).
@@ -128,7 +130,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Continue'
 $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
 
-$ScriptVersion  = '3.6.1'
+$ScriptVersion  = '3.7.0'
 $ScriptStartUtc = [DateTime]::UtcNow
 $Inv            = [Globalization.CultureInfo]::InvariantCulture
 
@@ -928,6 +930,158 @@ function Get-FileMeta {
 
 # Root to read user files from: the snapshot when it is mounted (no access-time updates on the evidence), else live.
 function Get-ReadRoot { if ($Ctx.ShadowLink) { $Ctx.ShadowLink } else { "$env:SystemDrive\" } }
+
+# Command-line history files (3.7.0), as patterns relative to the volume root. PSReadLine keeps one file per host
+# (ConsoleHost_history.txt, 'Visual Studio Code Host_history.txt', ...) in every account's profile, including SYSTEM
+# (PsExec -s, malicious services and scheduled tasks) and the service accounts. CMD keeps no history on disk: its
+# doskey history lives only in conhost.exe memory (the memory image), and in 4688 / Sysmon 1 events when logged.
+# Windows Terminal (1.21+) can save each tab's screen text as buffer_*.txt when it restores previous sessions.
+function Get-CommandHistoryPatterns {
+    param([string[]]$Users)
+    $psrl = 'AppData\Roaming\Microsoft\Windows\PowerShell\PSReadLine\*_history.txt'
+    $p = @("Windows\System32\config\systemprofile\$psrl", "Windows\SysWOW64\config\systemprofile\$psrl", "Windows\ServiceProfiles\*\$psrl")
+    foreach ($u in $Users) {
+        $p += "Users\$u\$psrl"
+        $p += "Users\$u\.bash_history"
+        $p += "Users\$u\.python_history"
+        $p += "Users\$u\AppData\Local\Packages\Microsoft.WindowsTerminal*_8wekyb3d8bbwe\LocalState\buffer_*.txt"
+        $p += "Users\$u\AppData\Local\Microsoft\Windows Terminal\buffer_*.txt"
+    }
+    $p
+}
+
+# One row per command from a collected history file. $OrigRel is the path relative to the volume root.
+function ConvertFrom-CommandHistoryFile {
+    param([Parameter(Mandatory)][IO.FileInfo]$File, [string]$OrigRel, [string]$CollectionRel)
+    $account = if ($OrigRel -match '^Users\\([^\\]+)\\') { $Matches[1] }
+    elseif ($OrigRel -match '\\systemprofile\\') { 'SYSTEM' }
+    elseif ($OrigRel -match '^Windows\\ServiceProfiles\\([^\\]+)\\') { $Matches[1] }
+    else { '' }
+    $kind = if ($File.Name -like 'buffer_*.txt') { 'terminal' }
+    elseif ($File.Name -eq '.bash_history') { 'bash' }
+    elseif ($File.Name -eq '.python_history') { 'python' }
+    else { 'psreadline' }
+    $source = switch ($kind) {
+        'terminal' { 'Windows Terminal screen text' }
+        'bash' { 'bash history' }
+        'python' { 'Python history' }
+        default {
+            $s = 'PowerShell history ({0})' -f ($File.Name -replace '_history\.txt$', '')
+            if ($OrigRel -match '^Windows\\SysWOW64\\') { $s += ', 32-bit' }
+            $s
+        }
+    }
+    $mod = $File.LastWriteTimeUtc.ToString('o')
+    try { $lines = [IO.File]::ReadAllLines($File.FullName) }
+    catch { Write-Error "Could not read ${CollectionRel}: $($_.Exception.Message)"; return }
+    $max = 32000   # longest text a spreadsheet cell holds; the full text stays in the copied file
+    $pendingTime = ''
+    # if/elseif, not switch: 'continue' inside a switch would only leave the switch, not skip to the next line.
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $first = $i; $cmd = $lines[$i]; $time = ''
+        if ($kind -eq 'psreadline') {
+            # A multi-line command is saved with a backtick ending every line but the last.
+            while ($cmd.EndsWith('`') -and $i + 1 -lt $lines.Count) { $i++; $cmd = $cmd.Substring(0, $cmd.Length - 1) + "`n" + $lines[$i] }
+        }
+        elseif ($kind -eq 'bash') {
+            # With HISTTIMEFORMAT set, bash writes '#<unix time>' before each command.
+            if ($cmd -match '^#(\d{9,11})$') {
+                $pendingTime = [DateTimeOffset]::FromUnixTimeSeconds([long]$Matches[1]).UtcDateTime.ToString('yyyy-MM-ddTHH:mm:ssZ', $Inv)
+                continue
+            }
+            $time = $pendingTime; $pendingTime = ''
+        }
+        elseif ($kind -eq 'terminal') {
+            # Screen text holds output too: keep only prompt lines (PowerShell 'PS C:\x> cmd', CMD 'C:\x>cmd').
+            if ($cmd -match '^PS [^>]*>\s*(\S.*)$') { $cmd = $Matches[1]; $source = 'Windows Terminal screen text (PowerShell prompt)' }
+            elseif ($cmd -match '^[A-Za-z]:\\[^>]*>\s*(\S.*)$') { $cmd = $Matches[1]; $source = 'Windows Terminal screen text (CMD prompt)' }
+            else { continue }
+        }
+        if (-not $cmd.Trim()) { continue }
+        if ($cmd.Length -gt $max) { $cmd = $cmd.Substring(0, $max) + ' [truncated]' }
+        [pscustomobject][ordered]@{
+            Account = $account; Source = $source; Line = $first + 1; TimeUtc = $time; Command = $cmd
+            File = $CollectionRel; FileModifiedUtc = $mod
+        }
+    }
+}
+
+# Command lines from a COPIED .evtx file (3.7.0): the collection's copy is read, never the live log. EventLogReader
+# instead of Get-WinEvent, because Get-WinEvent raises an error when nothing matches, which would mark the step WARN.
+function Get-CommandEventRows {
+    param([Parameter(Mandatory)][string]$Path, [int]$Id, [string]$Source, [string]$LogLabel, [int]$Cap = 200000,
+        [string]$OwnScript, [int]$OwnPid = -1, [datetime]$SinceUtc = [datetime]::MaxValue)
+    # Rows caused by this collection (Collect_v3's own script blocks, which PowerShell logs as "suspicious", and its own
+    # start) are kept but marked, so they're easy to filter out without hiding anything.
+    $max = 32000
+    $sidNames = @{}
+    $q = New-Object System.Diagnostics.Eventing.Reader.EventLogQuery($Path, [System.Diagnostics.Eventing.Reader.PathType]::FilePath, "*[System[(EventID=$Id)]]")
+    $reader = New-Object System.Diagnostics.Eventing.Reader.EventLogReader($q)
+    $n = 0
+    try {
+        while ($n -lt $Cap -and ($e = $reader.ReadEvent())) {
+            try {
+                $x = [xml]$e.ToXml()
+                $named = @{}; $plain = New-Object System.Collections.Generic.List[string]
+                foreach ($d in $x.SelectNodes("//*[local-name()='EventData']/*[local-name()='Data']")) {
+                    $nm = $d.GetAttribute('Name')
+                    if ($nm) { $named[$nm] = $d.InnerText } else { $plain.Add($d.InnerText) }
+                }
+                foreach ($d in $x.SelectNodes("//*[local-name()='UserData']/*/*")) { $named[$d.LocalName] = $d.InnerText }
+                $v = { param($k) if ($named.ContainsKey($k)) { [string]$named[$k] } else { '' } }
+                $account = ''; $proc = ''; $parent = ''; $cmd = ''; $detail = ''
+                switch ($Id) {
+                    4104 {
+                        $cmd = & $v 'ScriptBlockText'
+                        $detail = 'part {0} of {1}; ScriptBlockId {2}' -f (& $v 'MessageNumber'), (& $v 'MessageTotal'), (& $v 'ScriptBlockId')
+                        if (& $v 'Path') { $detail += '; script ' + (& $v 'Path') }
+                        if ($e.UserId) {
+                            $sid = $e.UserId.Value
+                            if (-not $sidNames.ContainsKey($sid)) {
+                                $sidNames[$sid] = try { $e.UserId.Translate([Security.Principal.NTAccount]).Value } catch { $sid }
+                            }
+                            $account = $sidNames[$sid]
+                        }
+                    }
+                    400 {
+                        $txt = ($plain -join "`n")
+                        if ($txt -match '(?m)^\s*HostApplication=(.*)$') { $cmd = $Matches[1].Trim() }
+                        if ($txt -match '(?m)^\s*HostName=(.*)$') { $detail = 'host ' + $Matches[1].Trim() }
+                    }
+                    4688 {
+                        $proc = & $v 'NewProcessName'; $parent = & $v 'ParentProcessName'; $cmd = & $v 'CommandLine'
+                        $account = ('{0}\{1}' -f (& $v 'SubjectDomainName'), (& $v 'SubjectUserName')).Trim('\')
+                        if (-not $cmd) { $detail = 'command line not recorded (audit setting "Include command line in process creation events" off)' }
+                    }
+                    1 {
+                        $proc = & $v 'Image'; $parent = & $v 'ParentImage'; $cmd = & $v 'CommandLine'; $account = & $v 'User'
+                        if (& $v 'ParentCommandLine') { $detail = 'parent: ' + (& $v 'ParentCommandLine') }
+                    }
+                    5861 {
+                        $cmd = & $v 'PossibleCause'
+                        $detail = ('namespace {0}; consumer {1}' -f (& $v 'Namespace'), (& $v 'CONSUMER'))
+                    }
+                }
+                $tUtc = $e.TimeCreated.ToUniversalTime()
+                if ($tUtc -ge $SinceUtc -and (($Id -eq 4104 -and $e.ProcessId -eq $OwnPid) -or
+                        ($OwnScript -and (((& $v 'Path') -eq $OwnScript) -or
+                            ($Id -eq 400 -and $cmd.IndexOf($OwnScript, [StringComparison]::OrdinalIgnoreCase) -ge 0))))) {
+                    $detail = ('{0}; from this collection run (Collect_v3 itself)' -f $detail).TrimStart('; ')
+                }
+                if ($cmd.Length -gt $max) { $cmd = $cmd.Substring(0, $max) + ' [truncated]' }
+                [pscustomobject][ordered]@{
+                    TimeUtc = $tUtc.ToString('yyyy-MM-ddTHH:mm:ss.fffZ', $Inv)
+                    Source = $Source; EventId = $Id; Account = $account; Process = $proc; ParentProcess = $parent
+                    Command = $cmd; Detail = $detail; RecordId = $e.RecordId; LogFile = $LogLabel
+                }
+                $n++
+            }
+            finally { $e.Dispose() }
+        }
+    }
+    finally { $reader.Dispose() }
+    if ($n -ge $Cap) { Write-Error "$LogLabel event ${Id}: stopped at $Cap rows; the rest are only in the .evtx file" }
+}
 
 # Map a path under Get-ReadRoot back to the original C:\ path, so outputs show where the file really lives.
 function ConvertTo-OriginalPath {
@@ -1852,12 +2006,15 @@ Add-Collector -Phase 5 -Level 3 -Name 'Copy: remote-access tool logs (AnyDesk, T
     }
 }
 
-Add-Collector -Phase 5 -Level 2 -Name 'Copy: user hives (NTUSER/UsrClass) + PowerShell history' -Format None -NeedsVss -Action {
+Add-Collector -Phase 5 -Level 2 -Name 'Copy: user hives (NTUSER/UsrClass)' -Format None -NeedsVss -Action {
     foreach ($u in Get-VssUserDirs) {
         Copy-VssArtifact "Users\$u\NTUSER.DAT*"
         Copy-VssArtifact "Users\$u\AppData\Local\Microsoft\Windows\UsrClass.dat*"
-        Copy-VssArtifact "Users\$u\AppData\Roaming\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt"
     }
+}
+
+Add-Collector -Phase 5 -Level 2 -Name 'Copy: command-line histories (PowerShell for every account and host, bash, Python, Windows Terminal)' -Format None -NeedsVss -Action {
+    foreach ($pat in Get-CommandHistoryPatterns (Get-VssUserDirs)) { Copy-VssArtifact $pat }
 }
 
 Add-Collector -Phase 5 -Level 2 -Name 'Copy: ALL event logs (snapshot)' -Format None -NeedsVss -Action {
@@ -2309,18 +2466,33 @@ Add-Collector -Phase 5 -Level 2 -Name 'Fallback: all event logs via wevtutil' -F
 }
 
 # Parity with the original batch script: live copies when no snapshot exists
-Add-Collector -Phase 5 -Level 2 -Name 'Fallback: live copy of Prefetch and PowerShell history' -Format None -OnlyWithoutVss -Action {
+Add-Collector -Phase 5 -Level 2 -Name 'Fallback: live copy of Prefetch and command-line histories' -Format None -OnlyWithoutVss -Action {
     $pf = Join-Path $Ctx.Disk 'Windows\Prefetch'
     New-Item -ItemType Directory -Force -Path $pf | Out-Null
     $copied = @(Copy-Item -Path (Join-Path $env:SystemRoot 'Prefetch\*.pf') -Destination $pf -Force -PassThru -ErrorAction Ignore).Count
     "Prefetch: $copied file(s)"
-    foreach ($u in @(Get-ChildItem -LiteralPath (Join-Path $env:SystemDrive 'Users') -Directory -Force -ErrorAction Ignore)) {
-        $src = Join-Path $u.FullName 'AppData\Roaming\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt'
-        if (Test-Path -LiteralPath $src) {
-            $d = Join-Path $Ctx.Disk ('Users\{0}\AppData\Roaming\Microsoft\Windows\PowerShell\PSReadLine' -f $u.Name)
+    $vol = "$env:SystemDrive\"
+    $users = @(Get-ChildItem -LiteralPath (Join-Path $vol 'Users') -Directory -Force -ErrorAction Ignore |
+        Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) } | ForEach-Object { $_.Name })
+    $n = 0
+    foreach ($pat in Get-CommandHistoryPatterns $users) {
+        foreach ($f in @(Get-ChildItem -Path (Join-Path $vol $pat) -Force -File -ErrorAction Ignore)) {
+            $d = Join-Path $Ctx.Disk (Split-Path -Parent $f.FullName.Substring($vol.Length))
             New-Item -ItemType Directory -Force -Path $d | Out-Null
-            Copy-Item -LiteralPath $src -Destination $d -Force -ErrorAction Ignore
-            "PowerShell history: $($u.Name)"
+            Copy-Item -LiteralPath $f.FullName -Destination $d -Force -ErrorAction Ignore
+            $n++
+        }
+    }
+    "Command-line histories: $n file(s)"
+}
+
+# One reviewable list of every command in the collected history files (the copies under Disk\, so it works the same
+# with or without the snapshot). The raw files stay where they are; this only lays them out together.
+Add-Collector -Phase 5 -Level 2 -Name 'Command history: all collected history files in one CSV' -Format Csv -Out 'System\command_history.csv' -Action {
+    foreach ($pat in Get-CommandHistoryPatterns @('*')) {
+        foreach ($f in @(Get-ChildItem -Path (Join-Path $Ctx.Disk $pat) -Force -File -ErrorAction Ignore)) {
+            ConvertFrom-CommandHistoryFile -File $f -OrigRel $f.FullName.Substring($Ctx.Disk.Length).TrimStart('\') `
+                -CollectionRel $f.FullName.Substring($Ctx.Root.Length).TrimStart('\')
         }
     }
 }
@@ -2451,6 +2623,31 @@ Add-Collector -Phase 7 -Level 3 -Name 'Parse: EvtxECmd' -Format None -Needs 'Evt
     if (-not (Test-Path -LiteralPath $in)) { throw 'No event logs collected in EventLogs\All' }
     Invoke-External -FilePath $Tool.EvtxECmd.FullName -ArgumentList @('-d', $in, '--csv', (Get-ParsedDir 'EvtxECmd'), '--csvf', 'evtx_all.csv') `
         -OutFile (Join-Path $Ctx.Root 'Parsed\EvtxECmd.log') -TimeoutSec 7200
+}
+
+# Command lines from the copied event logs, sorted by time, so they don't have to be dug out of evtx_all.csv. Needs no
+# tool. Reads EventLogs\All (snapshot copy or wevtutil fallback), else EventLogs\Live for the channels exported there.
+Add-Collector -Phase 7 -Level 3 -Name 'Command events: command lines from the event logs in one CSV' -Format Csv -Out 'EventLogs\command_events.csv' -Action {
+    $specs = @(
+        @{ Log = 'Microsoft-Windows-PowerShell%4Operational.evtx'; Id = 4104; Source = 'PowerShell script block' }
+        @{ Log = 'PowerShellCore%4Operational.evtx'; Id = 4104; Source = 'PowerShell 7 script block' }
+        @{ Log = 'Windows PowerShell.evtx'; Id = 400; Source = 'PowerShell started (command line)' }
+        @{ Log = 'Security.evtx'; Id = 4688; Source = 'Process created' }
+        @{ Log = 'Microsoft-Windows-Sysmon%4Operational.evtx'; Id = 1; Source = 'Sysmon process created' }
+        @{ Log = 'Microsoft-Windows-WMI-Activity%4Operational.evtx'; Id = 5861; Source = 'WMI permanent event consumer registered' }
+    )
+    $rows = foreach ($s in $specs) {
+        $path = $null
+        foreach ($sub in 'EventLogs\All', 'EventLogs\Live') {
+            $p = Join-Path (Join-Path $Ctx.Root $sub) $s.Log
+            if (Test-Path -LiteralPath $p) { $path = $p; break }
+        }
+        if ($path) {
+            Get-CommandEventRows -Path $path -Id $s.Id -Source $s.Source -LogLabel $path.Substring($Ctx.Root.Length).TrimStart('\') `
+                -OwnScript $PSCommandPath -OwnPid $PID -SinceUtc $ScriptStartUtc
+        }
+    }
+    @($rows) | Sort-Object TimeUtc
 }
 
 Add-Collector -Phase 7 -Level 3 -Name 'Parse: RECmd (batch file required)' -Format None -Needs 'RECmd' -Action {
@@ -3019,6 +3216,9 @@ WHAT IS HERE
   time zone (time.txt), accounts and groups, logged-on sessions, installed software and
   hotfixes, drivers (drivers_hashed.csv), USB and other devices, disks and BitLocker, shadow
   copies, virtual disks and ISO files, and a Prefetch listing.
+  command_history.csv: every command from the collected command-history files (PowerShell
+  for every account, including SYSTEM and the service accounts, bash, Python, Windows
+  Terminal prompt lines), one row per command.
 
 WHY IT MATTERS
   It is the context for everything else: which OS, which time zone, who has admin rights,
@@ -3031,6 +3231,11 @@ HOW TO ANALYZE
   - installed_software.csv: remote-access tools or unknown software installed recently.
   - drivers_hashed.csv: filter Triage for "review" and match the hashes against LOLDrivers.
   - shadow_copies.txt: missing shadow copies can be a sign of ransomware.
+  - command_history.csv: filter Account for SYSTEM or a service account, and search Command
+    for downloads, encoded commands (-enc) and Defender changes. The files have no times:
+    FileModifiedUtc dates each file's last command. CAUTION: commands can contain passwords.
+    CMD keeps no history file; its commands are in the memory image (conhost.exe) and, when
+    logged, in EventLogs\command_events.csv.
 '@ }
 
 @{ Paths = @('Network'); Guide = '7.3'
@@ -3140,6 +3345,10 @@ WHAT IS HERE
   Live\               Live exports of Security, System, Application, PowerShell and Sysmon.
   channel_config.csv  Every log channel: enabled or not, maximum size, record count,
                       oldest record.
+  command_events.csv  (Deep and Full) Command lines from these logs, sorted by time:
+                      PowerShell script blocks (4104), PowerShell start command lines (400),
+                      process creation (Security 4688, Sysmon 1), WMI permanent consumers
+                      (WMI-Activity 5861).
 
 WHY IT MATTERS
   Logons, service installs, process creation, PowerShell script blocks, RDP sessions and log
@@ -3155,6 +3364,11 @@ HOW TO ANALYZE
   3. To read one log, double-click the .evtx file to open it in Event Viewer.
   In channel_config.csv, a disabled channel or a Security log shrunk to a tiny maximum size
   is a sign of anti-forensics, even when the log itself looks clean.
+  command_events.csv is the quick way to read commands: one row per event, with the account,
+  process, parent and command line. A long script block is split over several 4104 events:
+  group them by the ScriptBlockId in Detail. No 4688 rows, or 4688 rows without command
+  lines, means process auditing (or its command-line option) was off. CAUTION: command
+  lines can contain passwords.
 '@ }
 
 @{ Paths = @('Disk'); Guide = '7.8'
@@ -3734,6 +3948,8 @@ HOW TO ANALYZE
 WHAT IS HERE
   One user's profile. NTUSER.DAT is this user's registry hive (with transaction logs). The
   artifact folders below (AppData, .ssh, Documents) have their own ANALYSIS_README.txt.
+  .bash_history (Git Bash, MSYS2, Cygwin) and .python_history (the Python prompt), when
+  present, are command histories: their commands are in System\command_history.csv.
 
 WHY IT MATTERS
   NTUSER.DAT records what this user did: programs run (UserAssist), recent files (RecentDocs),
@@ -3875,20 +4091,45 @@ HOW TO ANALYZE
   JumpList Explorer shows Jump Lists interactively.
 '@ }
 
-@{ Paths = @('Disk\Users\*\AppData\Roaming\Microsoft\Windows\PowerShell\PSReadLine'); Guide = '7.8'
-   Tools = @('Notepad++'); Text = @'
+@{ Paths = @('Disk\Users\*\AppData\Roaming\Microsoft\Windows\PowerShell\PSReadLine',
+        'Disk\Windows\System32\config\systemprofile\AppData\Roaming\Microsoft\Windows\PowerShell\PSReadLine',
+        'Disk\Windows\SysWOW64\config\systemprofile\AppData\Roaming\Microsoft\Windows\PowerShell\PSReadLine',
+        'Disk\Windows\ServiceProfiles\*\AppData\Roaming\Microsoft\Windows\PowerShell\PSReadLine'); Guide = '7.8'
+   Tools = @('Timeline Explorer', 'Notepad++'); Text = @'
 WHAT IS HERE
-  ConsoleHost_history.txt: this user's PowerShell command history (the last 4096 commands by
-  default).
+  This account's PowerShell command history, one file per PowerShell host:
+  ConsoleHost_history.txt (the console and Windows Terminal), "Visual Studio Code
+  Host_history.txt" and others. The last 4096 commands by default. Under systemprofile it is
+  the SYSTEM account's history; under ServiceProfiles, LocalService's or NetworkService's.
 
 WHY IT MATTERS
   Commands typed by an attacker often appear here word for word: downloads, credential
-  tools, lateral movement, Defender changes.
+  tools, lateral movement, Defender changes. A SYSTEM history usually means PowerShell was
+  run through PsExec -s, a service or a scheduled task: rare on a normal machine.
 
 HOW TO ANALYZE
-  Open it in a text editor. There are no timestamps; the file's last-modified time
-  (Disk\_CopyLog.csv) dates the last command. Search for Invoke-WebRequest, iwr, -enc,
-  Add-MpPreference, net user and similar.
+  Start with System\command_history.csv: every command from every history file, with the
+  account, source and line number, in Timeline Explorer. The files themselves have no
+  timestamps; their last-modified time (FileModifiedUtc in that CSV, or Disk\_CopyLog.csv)
+  dates the last command. Search for Invoke-WebRequest, iwr, -enc, Add-MpPreference, net user
+  and similar. CAUTION: typed commands can contain passwords.
+'@ }
+
+@{ Paths = @('Disk\Users\*\AppData\Local\Packages\Microsoft.WindowsTerminal*_8wekyb3d8bbwe\LocalState',
+        'Disk\Users\*\AppData\Local\Microsoft\Windows Terminal'); Guide = '7.8'
+   Tools = @('Timeline Explorer', 'Notepad++'); Text = @'
+WHAT IS HERE
+  buffer_*.txt: the screen text of Windows Terminal tabs, saved when Terminal is set to
+  restore the previous session. Commands AND their output, for PowerShell and CMD alike.
+
+WHY IT MATTERS
+  It is the only place on disk where CMD commands can survive: CMD itself keeps no history
+  file. The output shows what the commands returned.
+
+HOW TO ANALYZE
+  The prompt lines (PS C:\...> and C:\...>) are already in System\command_history.csv. Open
+  the files in a text editor to read the output around them. CAUTION: screen text can
+  contain passwords.
 '@ }
 
 @{ Paths = @('Disk\Users\*\Documents', 'Disk\Users\*\OneDrive\Documents'); Guide = '7.8'
