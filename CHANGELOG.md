@@ -18,12 +18,18 @@ All notable changes to `Collect_v3.ps1`. Format based on [Keep a Changelog](http
 ### Changed
 - The "user hives + PowerShell history" step is now "user hives"; the histories have their own step.
 
+### Fixed
+- **A stuck ListDlls could write hundreds of MB.** In a live run ListDlls kept retrying a process that had exited and wrote the same 4-line error 4.4 million times (315 MB) until the 15-minute timeout. It normally finishes in seconds, so its timeout is now 5 minutes, and `Invoke-External` has a new output cap (`-MaxOutputMB`, 50 MB for ListDlls) that stops a tool once its output passes that size. Whenever a tool is stopped (timeout or cap), repeated blocks of 1 to 8 lines that appear at least 3 times in a row are collapsed to one copy and a note with the repeat count, so the partial output stays readable; the step still reports FAIL, with the reason and the number of lines collapsed.
+
 ### Documentation
 - User guide: new section 7.15, "Command-line activity: where commands are recorded" (including CMD, which keeps no history file, only `conhost.exe` memory); sections 4, 7.2, 7.7, 7.8, the quick reference and 7.14 list the new files.
 
 ### Verified
-- Both CSVs built from a real Full collection's copies: 198 history lines gave 190 commands (5 multi-line commands joined); 524 event rows (450 script blocks, 74 PowerShell starts), of which 434 were correctly marked as the collector's own. - The copy step and `command_history.csv` against a constructed snapshot: SYSTEM, 32-bit SYSTEM and NetworkService histories attributed to the right account, a VS Code host file included and an unrelated file in the PSReadLine folder skipped, bash `HISTTIMEFORMAT` times attached to the right commands, Python history, and only the PowerShell and CMD prompt lines taken from Windows Terminal screen text.
-- **Not yet verified:** the 4688, Sysmon 1 and WMI-Activity 5861 rows (the lab machine has no process auditing, no Sysmon and no consumer registrations; the field names follow the published event schemas), the Windows Terminal `buffer_*.txt` file name (Terminal isn't installed on the lab machine), and a live run of the new steps.
+- Both CSVs built from a real Full collection's copies: 198 history lines gave 190 commands (5 multi-line commands joined); 524 event rows (450 script blocks, 74 PowerShell starts), of which 434 were correctly marked as the collector's own.
+- The copy step and `command_history.csv` against a constructed snapshot: SYSTEM, 32-bit SYSTEM and NetworkService histories attributed to the right account, a VS Code host file included and an unrelated file in the PSReadLine folder skipped, bash `HISTTIMEFORMAT` times attached to the right commands, Python history, and only the PowerShell and CMD prompt lines taken from Windows Terminal screen text.
+- A live elevated Deep run: 101 OK, 6 expected skips, 1 FAIL (the ListDlls hang fixed above). `command_history.csv` had 257 commands from 276 history lines (7 multi-line commands joined); `command_events.csv` had 518 rows sorted by time (406 script blocks, all marked as the collector's own; 111 PowerShell starts, the operator's own launch command correctly unmarked; and one WMI 5861 row, the "SCM Event Log Consumer" registration that ships with Windows). Both files were hashed and described in their folders' READMEs.
+- The ListDlls fix with a stand-in tool that loops on the same 4-line error: the 5 MB cap and a 6-second timeout each stopped it and collapsed about 95,000 and 29,000 repeats to one note line; a tool that finishes normally is untouched; collapsing 50 MB of the real 315 MB output took 3 seconds and removed only the loop.
+- **Not yet verified:** the 4688 and Sysmon 1 rows (the lab machine has no process auditing and no Sysmon; the field names follow the published event schemas), the Windows Terminal `buffer_*.txt` file name (Terminal isn't installed on the lab machine), and the ListDlls fix against a real ListDlls hang.
 
 ## [3.6.1]
 

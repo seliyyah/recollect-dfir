@@ -440,7 +440,7 @@ The folder tree **mirrors the original paths** (`Disk\Windows\...` = `C:\Windows
 | `autoruns.csv` | **Every** auto-start location with hashes and signatures. Filter *Signer* for "(Not verified)" and *Image Path* for user-writable folders. |
 | `sigcheck_Users.csv`, `sigcheck_ProgramData.csv`, `sigcheck_WinTemp.csv`, `sigcheck_System32.csv` | **Unsigned** executables only, with hashes. Malware usually lands in Users or ProgramData. |
 | `handle.txt` | Open handles per process (which process has which file or registry key open) |
-| `listdlls.txt` | DLLs loaded by each process. Look for DLLs loaded from odd paths. |
+| `listdlls.txt` | DLLs loaded by each process. Look for DLLs loaded from odd paths. If the step shows FAIL, ListDlls was stopped (5-minute limit, or its output passed 50 MB because it was stuck repeating an error); the partial output is kept, and repeated lines are collapsed to one copy followed by a `[Collect_v3: ... repeated N more times ...]` note. |
 | `logonsessions.txt` | Logon sessions and the processes in each |
 | `rawcopy_*.log` | RawCopy status messages |
 | `*.err` | The tool's stderr. Usually just its copyright banner, which is normal. |

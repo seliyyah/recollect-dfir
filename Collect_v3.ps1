@@ -253,6 +253,66 @@ function Convert-ToUtf8IfUtf16 {
     }
 }
 
+# After a tool was stopped (timeout or output cap), collapse repeated blocks so the partial output stays readable:
+# a tool stuck retrying one error can otherwise write hundreds of MB of the same few lines (ListDlls repeats a
+# 4-line block). A block of 1 to 8 lines is collapsed only once it appears 3 times in a row, so ordinary output
+# such as paired blank lines is left alone; one copy is kept, followed by a note with the repeat count. Streams the
+# file, so a large file is never held in memory. UTF-16 output is converted to UTF-8 on the way; any other output
+# is copied byte for byte (Latin-1 round-trips every byte). Returns the number of lines removed.
+function Compress-RepeatedLines {
+    param([string]$Path, [int]$MaxBlock = 8)
+    if (-not (Test-Path -LiteralPath $Path)) { return 0 }
+    $fs = [IO.File]::OpenRead($Path)
+    try { $b = New-Object byte[] 4; $n = $fs.Read($b, 0, 4) } finally { $fs.Dispose() }
+    $utf16 = ($n -ge 2 -and $b[0] -eq 0xFF -and $b[1] -eq 0xFE) -or
+             ($n -eq 4 -and $b[0] -ne 0 -and $b[1] -eq 0 -and $b[2] -ne 0 -and $b[3] -eq 0)
+    if ($utf16) { $inEnc = [Text.Encoding]::Unicode; $outEnc = New-Object Text.UTF8Encoding($true) }
+    else        { $inEnc = [Text.Encoding]::GetEncoding(28591); $outEnc = $inEnc }
+    $tmp = "$Path.collapse"
+    $removed = 0
+    $reader = New-Object IO.StreamReader($Path, $inEnc, $utf16)
+    $writer = New-Object IO.StreamWriter($tmp, $false, $outEnc)
+    try {
+        $pending = New-Object 'System.Collections.Generic.List[string]'   # lines not yet written
+        $unit = $null; $idx = 0; $reps = 0                                  # current repeating block, if any
+        $keep = 3 * $MaxBlock
+        while ($true) {
+            $line = $reader.ReadLine()
+            if ($null -ne $unit) {
+                if ($null -ne $line -and $line -ceq $unit[$idx]) {
+                    $idx++
+                    if ($idx -eq $unit.Count) { $reps++; $idx = 0 }
+                    continue
+                }
+                $writer.WriteLine(('[Collect_v3: the {0} line(s) above repeated {1} more times; collapsed after the tool was stopped]' -f $unit.Count, $reps))
+                $removed += $reps * $unit.Count
+                for ($k = 0; $k -lt $idx; $k++) { $pending.Add($unit[$k]) }  # a partial copy is real output
+                $unit = $null; $idx = 0; $reps = 0
+            }
+            if ($null -eq $line) { break }
+            $pending.Add($line)
+            $c = $pending.Count
+            for ($p = 1; $p -le $MaxBlock -and 3 * $p -le $c; $p++) {
+                $same = $true
+                for ($k = $c - 2 * $p; $k -lt $c -and $same; $k++) {
+                    if (-not ($pending[$k] -ceq $pending[$k - $p])) { $same = $false }
+                }
+                if ($same) {
+                    $unit = $pending.GetRange($c - $p, $p).ToArray()
+                    $pending.RemoveRange($c - 2 * $p, 2 * $p)                 # keep one copy, count two repeats
+                    foreach ($l in $pending) { $writer.WriteLine($l) }
+                    $pending.Clear(); $reps = 2; $idx = 0
+                    break
+                }
+            }
+            if ($null -eq $unit -and $pending.Count -gt $keep) { $writer.WriteLine($pending[0]); $pending.RemoveAt(0) }
+        }
+        foreach ($l in $pending) { $writer.WriteLine($l) }
+    } finally { $reader.Dispose(); $writer.Dispose() }
+    Move-Item -LiteralPath $tmp -Destination $Path -Force
+    return $removed
+}
+
 function ConvertTo-ArgString {
     param([string[]]$Items)
     ($Items | ForEach-Object {
@@ -268,7 +328,8 @@ function Invoke-External {
         [string[]]$ArgumentList = @(),
         [Parameter(Mandatory)][string]$OutFile,
         [int]$TimeoutSec = 900,
-        [string]$WorkingDirectory
+        [string]$WorkingDirectory,
+        [int]$MaxOutputMB = 0                 # 0 = no cap; otherwise stop the tool once its output passes this size
     )
     if (-not $WorkingDirectory) { $WorkingDirectory = Split-Path -Parent $FilePath }  # tools find Maps/ etc. here
     $errFile = "$OutFile.err"
@@ -286,10 +347,28 @@ function Invoke-External {
 
     $p = Start-Process @sp
     $null = $p.Handle                       # PS 5.1 quirk: cache handle so ExitCode is readable
-    if (-not $p.WaitForExit($TimeoutSec * 1000)) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSec)
+    $stopReason = $null
+    while (-not $p.WaitForExit(2000)) {
+        if ($MaxOutputMB -gt 0) {
+            $len = 0L
+            try { $len = (New-Object IO.FileInfo $OutFile).Length } catch {}
+            if ($len -gt [long]$MaxOutputMB * 1MB) {
+                $stopReason = "Stopped: output passed $MaxOutputMB MB (the tool was probably stuck repeating itself)"; break
+            }
+        }
+        if ([DateTime]::UtcNow -ge $deadline) { $stopReason = "Timed out after $TimeoutSec s"; break }
+    }
+    if ($stopReason) {
         try { $p.Kill() } catch {}
+        try { $null = $p.WaitForExit(10000) } catch {}
         $script:LastExit = -1
-        throw "Timed out after $TimeoutSec s: $FilePath"
+        $note = ''
+        try {
+            $gone = Compress-RepeatedLines $OutFile
+            if ($gone) { $note = "; partial output kept, $gone repeated line(s) collapsed" }
+        } catch { $note = "; could not collapse repeated lines: $($_.Exception.Message)" }
+        throw "${stopReason}: $FilePath$note"
     }
     $p.WaitForExit()
     $script:LastExit = $p.ExitCode
@@ -2512,7 +2591,7 @@ Add-Collector -Phase 6 -Level 2 -Name 'Handle (all handle types, owner)' -Format
 
 Add-Collector -Phase 6 -Level 2 -Name 'ListDlls' -Format None -Needs 'ListDlls' -Action {
     Invoke-External -FilePath $Tool.ListDlls.FullName -ArgumentList @('-accepteula') `
-        -OutFile (Join-Path $Ctx.Root 'Tools\listdlls.txt') -TimeoutSec 900
+        -OutFile (Join-Path $Ctx.Root 'Tools\listdlls.txt') -TimeoutSec 300 -MaxOutputMB 50
 }
 
 Add-Collector -Phase 6 -Level 2 -Name 'LogonSessions' -Format None -Needs 'LogonSessions' -Action {
@@ -4223,7 +4302,10 @@ HOW TO ANALYZE
 WHAT IS HERE
   Output of Sysinternals tools run live: autoruns.csv, sigcheck_*.csv (unsigned programs
   only, with hashes), handle.txt, listdlls.txt and logonsessions.txt. Also RawCopy logs and
-  *.err files (usually just the tool's banner, which is normal).
+  *.err files (usually just the tool's banner, which is normal). When a tool had to be
+  stopped (its step shows FAIL in CollectorResults.csv), its partial output is kept and
+  repeated lines are collapsed to one copy and a "[Collect_v3: ... repeated N more times"
+  note.
 
 WHY IT MATTERS
   autoruns.csv is the most complete list of auto-start locations, with signatures.
