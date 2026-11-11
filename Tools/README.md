@@ -19,8 +19,12 @@ Tools\
 ├── Magnet\                   MRCv*.exe
 ├── Comae\                    x64\DumpIt.exe
 ├── RawCopy\                  RawCopy64.exe, RawCopy.exe
-└── 7zip\                     7z.exe + 7z.dll   (copy from C:\Program Files\7-Zip; the installer alone won't work)
+├── 7zip\                     7z.exe + 7z.dll   (copy from C:\Program Files\7-Zip; the installer alone won't work)
+├── YARA\                     optional: your .yar/.yara rules for the process-memory scan (Full)
+└── LOLDrivers-main\          optional: the LOLDrivers repository, or any file named loldrivers*.csv/json
 ```
+
+Guided setup (`collect` with no parameters) offers the YARA scan only with rule files in `Tools\YARA\`. Rules that ship inside other tools, such as LOLDrivers' driver-file rules, aren't offered. It offers LOLDrivers matching when it finds `loldrivers*.csv/json`, or the repository's `loldrivers.io\content\api\drivers.csv`, anywhere under `Tools\`. In manual mode, `-YaraRules` and `-LolDriversCsv` accept files anywhere.
 
 ## Where to get them
 
@@ -35,6 +39,7 @@ Tools\
 | Comae DumpIt | Magnet Forensics / Comae Toolkit | `-Memory` (3rd choice) |
 | RawCopy | https://github.com/jschicht/RawCopy | Raw `$MFT`, `$LogFile`, pagefile, hiberfil (Deep / Full) |
 | 7-Zip | https://www.7-zip.org | `-Archive` only |
+| LOLDrivers | https://github.com/magicsword-io/LOLDrivers (or the CSV/JSON export from https://www.loldrivers.io) | `-LolDriversCsv` / guided LOLDrivers matching (optional) |
 
 Missing tools are reported as `SKIPPED` and the rest of the collection still runs.
 

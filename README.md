@@ -2,7 +2,7 @@
 
 A single PowerShell script that collects forensic evidence from a live Windows machine, in order of volatility. It drives the standard free DFIR toolset (Sysinternals, Eric Zimmerman's tools, KAPE, Velociraptor, WinPmem / Magnet RAM Capture / DumpIt, RawCopy) and writes a hashed, self-documenting collection: a manifest, per-step results, and SHA-256 hashes of every file.
 
-![PowerShell 5.1](https://img.shields.io/badge/PowerShell-5.1-blue) ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011%20%7C%20Server-informational) ![Version](https://img.shields.io/badge/version-3.7.0-green) ![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue)
+![PowerShell 5.1](https://img.shields.io/badge/PowerShell-5.1-blue) ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011%20%7C%20Server-informational) ![Version](https://img.shields.io/badge/version-3.8.0-green) ![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue)
 
 > 🛡️ **A blue-team tool** for incident responders, forensic analysts and researchers. Use it only on systems you own or are authorized to examine. See [Purpose and responsible use](#purpose-and-responsible-use).
 
@@ -11,24 +11,36 @@ A single PowerShell script that collects forensic evidence from a live Windows m
 ## Quick start
 
 1. Set up the toolkit drive as described in [Tools/README.md](Tools/README.md).
-2. On the target machine, open **PowerShell as Administrator**, go to the toolkit folder, and run:
+2. On the target machine, open a Command Prompt on the toolkit drive and type **`collect`**. In Windows Explorer you can double-click `collect.cmd` instead.
 
-```powershell
-cd X:\Toolkit
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect_v3.ps1 -CollectionProfile Full -Memory -CaseId IR-001 -NonInteractive -AcceptLicense
+```bat
+X:
+cd \Toolkit
+collect
 ```
+
+**Guided setup** asks Windows for administrator rights, shows the license terms, then takes you through five short steps: case ID, profile, memory capture, output folder and options. Enter accepts the suggested value. A summary with time and space estimates comes last, and nothing is collected until you confirm. The summary also prints the equivalent manual command.
+
+**Manual mode:** give any parameter and no questions are asked except the license (`-AcceptLicense` skips that too). Run it from a terminal opened with *Run as administrator*:
+
+```bat
+collect -CaseId IR-001 -CollectionProfile Full -Memory -OutputPath X:\Collections
+```
+
+`collect /?` shows more examples. `collect.cmd` starts Windows PowerShell with `-NoProfile`, and with the execution policy bypassed for that one process. The full `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect_v3.ps1 ...` form still works.
 
 Results go to `X:\Toolkit\Collections\<CaseId>_<COMPUTER>_<UTC time>\`. Use `-OutputPath` to send them elsewhere. **Never write output to the suspect machine's internal disks.**
 
 | Profile | Collects | Typical time |
 |---|---|---|
 | `Quick` | Volatile state: processes, network, sessions, services, persistence, event-log channel and ETW tampering checks | 2–3 min |
-| `Standard` | + shadow copy, registry hives, all event logs, Prefetch, system and security config, Autoruns, driver hashes and loaded kernel modules, WFP filters, Sysmon config, SSH keys, PowerShell transcripts, Mark-of-the-Web | ~10 min |
-| `Deep` | + `$MFT`, USN journal, SRUM, LNK / Jump Lists, browser artifacts, all Zimmerman parsers, extra internal drives, RMM tools, IIS, exfiltration-tool search | 30–40 min |
-| `Full` | + KAPE, Velociraptor, pagefile / hiberfil, full Recycle Bin, Sigcheck of System32 | 60–100 min |
+| `Standard` | + shadow copy, registry hives, all event logs, Prefetch, system and security config, Autoruns, driver hashes and loaded kernel modules, WFP filters, Sysmon config, SSH keys, PowerShell transcripts, Mark-of-the-Web, command-line histories | ~10 min |
+| `Deep` | + `$MFT`, USN journal, SRUM, LNK / Jump Lists, browser artifacts, all Zimmerman parsers, extra internal drives, RMM tools, IIS, exfiltration-tool search | 30–60 min |
+| `Full` | + KAPE, Velociraptor, pagefile / hiberfil, full Recycle Bin, Sigcheck of System32 | 1–2 hours |
+| `MemoryOnly` | RAM image, plus the clock and time zone. Nothing else | ~5 min for 32 GB |
 | `-Memory` | RAM image first (any profile) | ~5 min for 32 GB |
 
-Opt-in extras: `-YaraRules <file.yar>` (process-memory YARA scan, Full), `-LolDriversCsv <file>` (match driver hashes against a local LOLDrivers export) and `-DefenderQuarantine` (copies quarantined **malware samples**; see below).
+Opt-in extras: `-YaraRules <file.yar>` (process-memory YARA scan, Full), `-LolDriversCsv <file>` (match driver hashes against a local LOLDrivers export) and `-DefenderQuarantine` (copies quarantined **malware samples**; see below). Guided setup offers each one only when it applies to the chosen profile. It finds YARA rules in `Tools\YARA\` and a LOLDrivers export anywhere under `Tools\`.
 
 📖 **The full instructions** (every parameter, what every output folder contains and how to analyze it, and a Timeline Explorer refresher) are in **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)**.
 
@@ -36,6 +48,7 @@ Opt-in extras: `-YaraRules <file.yar>` (process-memory YARA scan, Full), `-LolDr
 
 ## Features
 
+- **Guided or manual:** type `collect` for a guided setup with clear questions, sensible defaults and a summary to confirm. Give parameters for manual mode, or add `-NonInteractive` to script it. Both modes record the same manifest, and guided runs also log the equivalent manual command.
 - **Order of volatility:** memory → network → processes → configuration → disk artifacts → parsers.
 - **Forensically careful:** refuses to write to the system drive or other internal disks unless explicitly allowed; calls Windows binaries by full path; timestamps in UTC; removes the shadow copy and temporary link it creates, even on Ctrl+C.
 - **Chain of custody:** `manifest.json` (script hash, parameters, host, timing, tool inventory, per-step results) and `FileHashes.csv` (SHA-256 of every collected file).
@@ -59,6 +72,7 @@ Opt-in extras: `-YaraRules <file.yar>` (process-memory YARA scan, Full), `-LolDr
 
 ```text
 .
+├── collect.cmd           # launcher: guided setup, or manual mode with parameters
 ├── Collect_v3.ps1        # the collector (must stay next to the Tools folder)
 ├── README.md
 ├── CHANGELOG.md

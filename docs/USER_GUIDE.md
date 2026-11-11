@@ -1,6 +1,6 @@
 # Collect_v3 — Windows DFIR Collection Script: User Guide
 
-**Script version:** 3.7.0  **Runs on:** Windows 10 / 11 / Server 2016+ with Windows PowerShell 5.1  **Needs:** Administrator rights
+**Script version:** 3.8.0  **Runs on:** Windows 10 / 11 / Server 2016+ with Windows PowerShell 5.1  **Needs:** Administrator rights
 
 > 🛡️ Collect_v3 is a **blue-team** tool for incident responders, forensic analysts and researchers. It orchestrates freely available forensic tools, and their authors are credited in the [README](../README.md#credits). Please read [Purpose and responsible use](../README.md#purpose-and-responsible-use) before using it on a real case.
 
@@ -8,15 +8,59 @@
 
 ## 1. Quick start: launch commands
 
-> **Before you start:** only run this on a machine you are **authorized** to examine. Plug in your toolkit drive, then open **PowerShell as Administrator** (right-click → *Run as administrator*).
+> **Before you start:** only run this on a machine you are **authorized** to examine. Plug in your toolkit drive.
 
-**Step 1: go to the toolkit folder.** Replace `X:` with whatever letter your toolkit drive has (D:, E:, G: ...):
+There are two ways to start a collection:
+
+| | Guided setup | Manual mode |
+|---|---|---|
+| **Start it with** | `collect` (no parameters), or double-click `collect.cmd` | `collect` followed by parameters |
+| **Administrator rights** | Asked for automatically (a Windows permission prompt; the collection opens in a new window) | Run it from a terminal opened with *Run as administrator* |
+| **Questions** | License, then five short steps and a summary to confirm | Only the license (none with `-AcceptLicense`) |
+| **Best for** | Most collections, and anyone new to the tool | Experienced users, scripts, repeatable procedures |
+
+### 1.1 Guided setup (recommended)
+
+Open a Command Prompt, switch to the toolkit drive and type `collect`. Replace `X:` with your toolkit drive's letter:
+
+```bat
+X:
+cd \Toolkit
+collect
+```
+
+In PowerShell, type `.\collect` instead: PowerShell doesn't run files from the current folder without `.\`. You can also double-click `collect.cmd` in Windows Explorer.
+
+`collect.cmd` can sit next to `Collect_v3.ps1`, or at the root of the drive with the toolkit in a folder one level below it (for example `X:\collect.cmd` with `X:\Toolkit\`). In the second case, typing `X:` then `collect` is all it takes.
+
+After the license terms, the setup asks:
+
+| Step | Question | Default (press Enter) |
+|---|---|---|
+| 1. Case details | Case ID (letters, numbers, dots, dashes, underscores), then examiner name | Case ID must be typed; examiner = the signed-in user |
+| 2. Collection profile | Quick, Standard, Deep, Full or Memory Only (section 4), each with typical time and space | Standard |
+| 3. Memory capture | Capture RAM first? Shows this computer's RAM size, the time and the space it needs | Yes for Deep and Full, No for Quick and Standard; always included in Memory Only |
+| 4. Output location | The folder for the collection. Shows the drive's type and free space; warns before writing to this computer's own disks or when space is short | `<toolkit>\Collections` |
+| 5. Options | Only the options that apply: Defender quarantine (Standard and up), LOLDrivers matching (when a LOLDrivers export is in `Tools\`), YARA scan (Full, when rules are in `Tools\YARA\`), archive with a password | Off, except LOLDrivers matching |
+
+A summary follows: case, examiner, computer, profile, memory, output drive, options, estimated time and space. It also shows the **same collection as a manual-mode command**, which `Collection.log` records too. The collection starts only when you confirm. Type **Q** at any prompt to quit; nothing has been collected or written up to that point.
+
+Guided runs record their choices in `manifest.json` (`Script.Parameters`) as if they had been typed, and `Script.LaunchMode` says which mode was used. The archive password is never displayed, logged or recorded.
+
+### 1.2 Manual mode
+
+Give `collect` (or `Collect_v3.ps1`) any parameter and it asks no questions apart from the license and the warnings below. Open a terminal with *Run as administrator* and go to the toolkit folder:
 
 ```powershell
 cd X:\Toolkit
 ```
 
-**Step 2: run ONE of these.** Change `-CaseId` to your own case number.
+Then run **one** of these, changing `-CaseId` to your own case number. The `collect` form and the long `powershell.exe` form below are equivalent: `collect.cmd` adds `-NoProfile -ExecutionPolicy Bypass` for you.
+
+```bat
+collect -CaseId IR-001 -CollectionProfile Full -Memory -OutputPath X:\Collections
+collect -CaseId IR-001 -CollectionProfile MemoryOnly
+```
 
 > **License terms.** Every run starts by showing the license (BSD 3-Clause, including its "as is" warranty disclaimer) and an authorized-use notice, and asks **"Do you agree to these terms? [y/N]"**. Type `y` to continue. Any other answer ends the run before anything is collected or written. The commands below add `-AcceptLicense`, which records your agreement without the prompt; it's required with `-NonInteractive`, and a `-NonInteractive` run without it stops at once. Either way, the acceptance (how and when, in UTC) is recorded in `Collection.log`, `manifest.json` and `manifest.txt`. Read the terms once in [LICENSE](../LICENSE) or by running the script without `-AcceptLicense`.
 
@@ -32,7 +76,13 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect_v3.ps1 -Collec
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect_v3.ps1 -CollectionProfile Full -Memory -KapeVss -CaseId IR-001 -NonInteractive -AcceptLicense
 ```
 
-**Deep (no KAPE or Velociraptor; about 30–40 minutes):**
+**Memory only (RAM image plus the clock and time zone; about 5 minutes for 32 GB):**
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect_v3.ps1 -CollectionProfile MemoryOnly -CaseId IR-001 -NonInteractive -AcceptLicense
+```
+
+**Deep (no KAPE or Velociraptor; about 30–60 minutes):**
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect_v3.ps1 -CollectionProfile Deep -Memory -CaseId IR-001 -NonInteractive -AcceptLicense
@@ -50,11 +100,13 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect_v3.ps1 -Collec
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect_v3.ps1 -CollectionProfile Quick -CaseId IR-001 -NonInteractive -AcceptLicense
 ```
 
-**Interactive (the script asks you which profile to use):**
+**Manual, but asked for the profile** (any parameter except `-CollectionProfile`: the script shows the profile menu):
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect_v3.ps1 -CaseId IR-001
 ```
+
+Started with **no** parameters at all, `Collect_v3.ps1` runs the guided setup, exactly like `collect`.
 
 The results land in `X:\Toolkit\Collections\<CaseId>_<ComputerName>_<UTC time>\`. To send them somewhere else, add `-OutputPath Y:\Evidence`.
 
@@ -133,6 +185,7 @@ The script finds each tool by its **file name**, searching every folder under `T
 
 ```text
 X:\Toolkit\                              <- any drive letter works
+├── collect.cmd                          <- the launcher (may also go one level up, at X:\)
 ├── Collect_v3.ps1                       <- the script
 ├── docs\USER_GUIDE.md                   <- this guide
 ├── Tools\                               <- every tool goes in here (subfolder names don't matter)
@@ -151,7 +204,9 @@ X:\Toolkit\                              <- any drive letter works
 │   ├── Magnet\                          <- MRCv120.exe
 │   ├── Comae\                           <- x64\DumpIt.exe (x86\ and ARM64\ can stay; x64 is preferred)
 │   ├── RawCopy\                         <- RawCopy64.exe, RawCopy.exe
-│   └── 7zip\                            <- 7z.exe + 7z.dll
+│   ├── 7zip\                            <- 7z.exe + 7z.dll
+│   ├── YARA\                            <- optional: .yar/.yara rules for the process scan (guided setup offers them)
+│   └── LOLDrivers-main\                 <- optional: the LOLDrivers repository (guided setup finds its drivers.csv)
 └── Collections\                         <- created automatically; each run gets its own subfolder
 ```
 
@@ -171,19 +226,20 @@ X:\Toolkit\                              <- any drive letter works
 
 ## 4. Collection profiles
 
-Each profile includes everything in the profiles above it.
+Each of Quick, Standard, Deep and Full includes everything in the profiles above it. Memory Only stands apart.
 
 | Profile | Adds | Typical time |
 |---|---|---|
+| **Memory Only** (0) | A RAM image only, plus `System\time.txt` (clock, time zone and time-sync status, which memory analysis needs to read timestamps correctly). No shadow copy and no live tools. Use it when time is short or when memory is all you need now; you can run another profile afterwards. Needs WinPmem, Magnet RAM Capture or DumpIt in the toolkit; without one, the run stops with an error before collecting. | about 5 min for 32 GB |
 | **Quick** (1) | System time and clock, network connections (joined to processes), TCPView, DNS cache, ARP and routes, SMB sessions, named pipes, port proxies, processes (with hash, signature and owner), logon sessions, services, scheduled tasks, Run keys, WMI subscriptions, BITS, startup commands, IFEO debuggers, shadow-copy list, OS identity, local accounts, disks and BitLocker, **event log channel configuration**, **ETW sessions and AutoLogger settings**, SMB open files | 2–3 min |
 | **Standard** (2) | Creates a **shadow copy (VSS snapshot)** and copies from it: all registry hives (system, user and service accounts), Amcache, **all event logs**, Prefetch, scheduled-task XML, setupapi logs, Defender logs, BITS queue, PCA, GPO scripts, Startup folders, **command-line histories** (PowerShell for every account, including SYSTEM and the service accounts, plus bash, Python and Windows Terminal), laid out in `System\command_history.csv`. Also: systeminfo, installed software, hotfixes, drivers (and their signatures), USB storage history, PnP devices, AppX packages, Defender, firewall and audit config, gpresult, security settings (LSA, WDigest, RDP, UAC, PowerShell logging), certificate stores, stored credential *names*, Kerberos tickets, local groups, accessibility binaries (sticky-keys check), live export of key event logs, Autoruns, Handle, ListDlls, LogonSessions. New in 3.4: **driver hashes and loaded kernel modules** (LOLDrivers-ready), code integrity / vulnerable-driver blocklist / VBS, **WFP filters**, Sysmon config, VMs and mounted disk images, service failure actions, SSH keys and configs, PowerShell transcripts, **Mark-of-the-Web** | ~10 min |
-| **Deep** (3) | SRUM, WMI repository, LNK files and Jump Lists, ActivitiesCache (Timeline), RDP bitmap cache, WER reports, Panther and debug logs, thumbcache, iconcache, WebCache, notifications, OneDrive logs, remote-access tool logs (AnyDesk, TeamViewer, RustDesk, Splashtop), browser artifacts (history, bookmarks, sessions, extensions; **not** cookies, passwords or autofill), raw `$MFT`, `$LogFile` and `$Boot`, the USN journal, Sigcheck of user-writable folders, **all Zimmerman parsers**, extra internal drives (section 5.1). New in 3.4: ScreenConnect, Atera, LogMeIn and discovered RMM agents (logs copied, configs presence-only), IIS config and web-root listing, Notepad TabState and Sticky Notes, MEGAsync logs, WFP full state, disk-image file search, **exfiltration-tool search** (rclone, MEGA, ngrok …). New in 3.7: `EventLogs\command_events.csv`, every command line from the event logs (PowerShell 4104 and 400, 4688, Sysmon 1, WMI-Activity 5861) in time order | 30–40 min |
-| **Full** (4) | pagefile, hiberfil and swapfile, the full Recycle Bin, the Windows Search database, MEMORY.DMP, Sigcheck of System32, **KAPE** (`!SANS_Triage` + `!EZParser`), **Velociraptor** (23 artifacts, including browser history and RDP logon chains) | 60–100 min |
+| **Deep** (3) | SRUM, WMI repository, LNK files and Jump Lists, ActivitiesCache (Timeline), RDP bitmap cache, WER reports, Panther and debug logs, thumbcache, iconcache, WebCache, notifications, OneDrive logs, remote-access tool logs (AnyDesk, TeamViewer, RustDesk, Splashtop), browser artifacts (history, bookmarks, sessions, extensions; **not** cookies, passwords or autofill), raw `$MFT`, `$LogFile` and `$Boot`, the USN journal, Sigcheck of user-writable folders, **all Zimmerman parsers**, extra internal drives (section 5.1). New in 3.4: ScreenConnect, Atera, LogMeIn and discovered RMM agents (logs copied, configs presence-only), IIS config and web-root listing, Notepad TabState and Sticky Notes, MEGAsync logs, WFP full state, disk-image file search, **exfiltration-tool search** (rclone, MEGA, ngrok …). New in 3.7: `EventLogs\command_events.csv`, every command line from the event logs (PowerShell 4104 and 400, 4688, Sysmon 1, WMI-Activity 5861) in time order | 30–60 min |
+| **Full** (4) | pagefile, hiberfil and swapfile, the full Recycle Bin, the Windows Search database, MEMORY.DMP, Sigcheck of System32, **KAPE** (`!SANS_Triage` + `!EZParser`), **Velociraptor** (23 artifacts, including browser history and RDP logon chains) | 1–2 hours |
 | `-Memory` (any profile) | RAM image, taken **first**, before anything else changes memory | 4–5 min for 32 GB |
 | `-YaraRules` (Full, opt-in) | YARA scan of process memory with your rules (Velociraptor `Windows.Detection.Yara.Process`) | slow; depends on rules and process count |
 | `-DefenderQuarantine` (opt-in) | Copy of Defender's quarantine: **malware samples** | depends on quarantine size |
 
-The 3.4 additions haven't been timed on the lab laptop yet. Allow some extra time for Standard and Deep compared with the figures above.
+Times are from the lab laptop writing to a USB 3 drive: Quick 2 minutes, Deep 60 minutes and Full 60 minutes to 2 hours in recent runs. Standard hasn't been timed since 3.4 added steps, so allow extra time beyond the 10 minutes shown. Slower disks, more data and busy hosts take longer. Guided setup shows the same figures. Top-level output folders that a profile leaves empty (for example `KAPE\` in a Standard run) are removed at the end, so the collection shows only what was collected.
 
 ---
 
@@ -191,7 +247,7 @@ The 3.4 additions haven't been timed on the lab laptop yet. Allow some extra tim
 
 | Parameter | What it does | Default |
 |---|---|---|
-| `-CollectionProfile` | `Quick`, `Standard`, `Deep` or `Full` | Asks you (fails if `-NonInteractive`) |
+| `-CollectionProfile` | `Quick`, `Standard`, `Deep`, `Full` or `MemoryOnly` (implies `-Memory`) | Asks you (fails if `-NonInteractive`) |
 | `-CaseId` | Case number; used in the folder name and manifest | `NOCASE` |
 | `-Operator` | Your name; recorded in the manifest | `DOMAIN\user` |
 | `-OutputPath` | Where results go | `<toolkit>\Collections` |
@@ -209,7 +265,7 @@ The 3.4 additions haven't been timed on the lab laptop yet. Allow some extra tim
 | `-VelociraptorArtifact` | List of Velociraptor artifacts | 23 built-ins (section 7.12) |
 | `-VelociraptorArgs` | `Name=Value` parameters passed to **every** artifact | none |
 | `-VelociraptorArtifactArgs` | Parameters for **one** artifact: `@{ 'Windows.EventLogs.RDPAuth' = @('DateAfter=2026-01-01') }`. A hashtable can't be passed through `powershell.exe -File`; launch with `-Command "& .\Collect_v3.ps1 ... -VelociraptorArtifactArgs @{...}"` or run the script directly from an elevated PowerShell prompt. | none |
-| `-YaraRules C:\path\rules.yar` | **Opt-in, Full only.** Scans process memory with these rules through Velociraptor. The rules file is copied into `Velociraptor\` and hashed. ⚠ Slow, and memory scanning can trigger EDR alerts. The rule text is passed on the command line, so files over ~30,000 characters must be split. To scan only some processes, add `-VelociraptorArtifactArgs @{'Windows.Detection.Yara.Process'=@('ProcessRegex=(?i)notepad')}` (the `-Command` form, see that row). Hits are in `Windows.Detection.Yara.Process.zip` → `results\*.json`. | off |
+| `-YaraRules C:\path\rules.yar` | **Opt-in, Full only.** Scans process memory with these rules through Velociraptor. The rules file is copied into `Velociraptor\` and hashed. ⚠ Slow, and memory scanning can trigger EDR alerts. The rule text is passed on the command line, so files over ~30,000 characters must be split. To scan only some processes, add `-VelociraptorArtifactArgs @{'Windows.Detection.Yara.Process'=@('ProcessRegex=(?i)notepad')}` (the `-Command` form, see that row). Hits are in `Windows.Detection.Yara.Process.zip` → `results\*.json`. Guided setup offers the rule files in `Tools\YARA\`. | off |
 | `-LolDriversCsv C:\path\drivers.csv` | Local copy of the LOLDrivers export (CSV or JSON from loldrivers.io). Every MD5/SHA-1/SHA-256 in it is matched against `System\drivers_hashed.csv`. Any text file works, so the YAML files from the LOLDrivers repository can simply be concatenated into one file. The log shows how many hashes were loaded and how many drivers matched (column `LolDriversMatch`). No network access. | off |
 | `-DefenderQuarantine` | **Opt-in.** Copy Defender's quarantine to `Security\DefenderQuarantine\`. ⚠ These are **malware samples**. Never enabled by any profile. Use with `-Archive -ArchivePassword`; the script warns loudly if you archive without a password. | off |
 | `-NtpServer` | Compare the clock against an NTP server (needs network) | off |
@@ -579,7 +635,12 @@ Not collected: WSL shells keep their `.bash_history` inside the distribution's v
 
 | Message | Meaning / fix |
 |---|---|
-| `This script must run from an elevated session` | Open PowerShell with *Run as administrator* |
+| `Collect_v3 needs administrator rights` | Start it with `collect` and no parameters (guided setup asks Windows for permission), or open the terminal with *Run as administrator* for manual mode |
+| `'collect' is not recognized` in PowerShell | Type `.\collect`: PowerShell doesn't run files from the current folder without `.\` |
+| `Administrator permission was not given` | The Windows permission (UAC) prompt was declined or closed. Run `collect` again and choose **Yes** |
+| `Collect_v3.ps1 was not found` / `More than one copy` | `collect.cmd` looks next to itself, then one folder down. Keep it beside `Collect_v3.ps1`, or at the drive root with a single toolkit folder below it |
+| `Memory Only needs WinPmem, Magnet RAM Capture or DumpIt` | Put a memory tool under `Tools\` (section 3), or choose another profile |
+| Guided setup doesn't offer the YARA scan or LOLDrivers matching | It offers YARA only for Full and only with rule files in `Tools\YARA\`; LOLDrivers only for Standard and up, and only with `loldrivers*.csv/json` or the repository's `loldrivers.io\content\api\drivers.csv` under `Tools\`. Use `-YaraRules` / `-LolDriversCsv` in manual mode for files elsewhere |
 | `Skipped ...\<Tool>.exe: needs .NET 10.0.0 runtime` | Harmless. KAPE's bundled copy is used instead (check that a `FOUND` line follows). |
 | `SKIPPED - tool not found: X` | Put that tool under `Tools\` (section 3) |
 | `Output is on the SYSTEM drive` / `INTERNAL disk` | Use `-OutputPath` on an external drive |

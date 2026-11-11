@@ -9,6 +9,7 @@
     and records the result in the manifest.
 
     Profiles
+      MemoryOnly (0) RAM capture only (WinPmem / Magnet RAM Capture / DumpIt), plus the clock and time zone.
       Quick    (1)  Volatile state only: time, network, processes, sessions, services, persistence,
                       event log channel config, ETW/AutoLogger sessions.
       Standard (2)  + VSS snapshot, registry hives, user hives, ALL event logs, prefetch, task XML,
@@ -25,7 +26,13 @@
       1 Memory | 2 Time + network | 3 Processes/sessions/services | 4 System config
       5 VSS snapshot + disk artifacts | 6 Slow live tools | 7 Parsers | 8 KAPE / Velociraptor
 
-    Run from an elevated prompt, ideally from removable media or a network share:
+    Easiest start: run collect.cmd (in the toolkit folder or at the drive root) with no parameters. Guided setup
+    asks for administrator rights, then for the case ID, profile, memory capture, output folder and options, shows
+    a summary with the equivalent manual command, and collects only after you confirm. Started with no parameters,
+    Collect_v3.ps1 itself runs the same guided setup.
+
+    Manual mode (any parameter given): run from an elevated prompt, ideally from removable media or a network share:
+      collect -CollectionProfile Standard -CaseId IR-2026-001 -OutputPath X:\Collections
       powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect_v3.ps1 `
           -CollectionProfile Standard -CaseId IR-2026-001 -OutputPath X:\Collections -NonInteractive -AcceptLicense
 
@@ -36,7 +43,8 @@
 
 .PARAMETER AcceptLicense      Agree to the license terms and authorized-use notice without being prompted. Required
                               with -NonInteractive. Recorded in Collection.log and the manifest.
-.PARAMETER CollectionProfile  Quick | Standard | Deep | Full. Prompted for if omitted (unless -NonInteractive).
+.PARAMETER CollectionProfile  Quick | Standard | Deep | Full | MemoryOnly. Prompted for if omitted (unless -NonInteractive).
+                              MemoryOnly implies -Memory.
 .PARAMETER OutputPath         Base folder for collections. Default: <toolkit>\Collections.
 .PARAMETER ToolsPath          Folder searched for tools. Default: <toolkit>\Tools if present, else <toolkit>.
 .PARAMETER CaseId             Case / ticket identifier (recorded in folder name and manifest).
@@ -71,7 +79,7 @@
                               analyze them and links to the tools' official pages. Collect_v3 runs none of those tools.
 
 .NOTES
-    Version : 3.7.0
+    Version : 3.8.0
     License : BSD 3-Clause (SPDX-License-Identifier: BSD-3-Clause). Copyright (c) 2026, seliyyah-dfir.
               See LICENSE. Provided "as is", without warranty of any kind.
     Tested  : syntax-targeted at Windows PowerShell 5.1 (the common endpoint default).
@@ -85,7 +93,7 @@
 
 [CmdletBinding()]
 param(
-    [ValidateSet('Quick', 'Standard', 'Deep', 'Full')]
+    [ValidateSet('Quick', 'Standard', 'Deep', 'Full', 'MemoryOnly')]
     [string]$CollectionProfile,
     [string]$OutputPath,
     [string]$ToolsPath,
@@ -130,8 +138,10 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Continue'
 $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
 
-$ScriptVersion  = '3.7.0'
+$ScriptVersion  = '3.8.0'
 $ScriptStartUtc = [DateTime]::UtcNow
+# Guided setup when started with no parameters at all (for example by collect.cmd); manual mode otherwise.
+$GuidedMode     = ($PSBoundParameters.Count -eq 0)
 $Inv            = [Globalization.CultureInfo]::InvariantCulture
 
 # ===================================================================
@@ -228,6 +238,383 @@ function Get-FreeSpaceGB {
         [math]::Round((New-Object IO.DriveInfo($root)).AvailableFreeSpace / 1GB, 1)
     }
     catch { $null }
+}
+
+# ===================================================================
+# CONSOLE INTERFACE (banner, guided setup, profile menu)
+# ===================================================================
+# Plain ASCII on purpose: Windows PowerShell 5.1 reads a script without a BOM in the system code page, and a
+# console font may lack box-drawing characters.
+
+$UiWidth = 70
+function Write-UiRule  { param([string]$Char = '-') Write-Host ('  ' + ($Char * ($UiWidth - 2))) -ForegroundColor DarkGray }
+function Write-UiText  { param([string]$Text = '', [string]$Color = 'Gray') Write-Host ('  ' + $Text) -ForegroundColor $Color }
+function Write-UiField {
+    param([string]$Label, [string]$Value, [string]$Color = 'White')
+    Write-Host ('  {0,-17}' -f $Label) -ForegroundColor DarkGray -NoNewline
+    Write-Host $Value -ForegroundColor $Color
+}
+function Write-UiStep {
+    param([int]$Number, [int]$Of, [string]$Title)
+    Write-Host ''
+    Write-Host ('  STEP {0} OF {1}   ' -f $Number, $Of) -ForegroundColor DarkCyan -NoNewline
+    Write-Host $Title.ToUpper() -ForegroundColor Cyan
+    Write-UiRule
+}
+# Wraps text to the console layout, indented.
+function Write-UiWrapped {
+    param([string]$Text, [int]$Indent = 2, [string]$Color = 'Gray')
+    $max = $UiWidth - $Indent
+    $line = ''
+    foreach ($w in ($Text -split '\s+' | Where-Object { $_ })) {
+        if ($line -and ($line.Length + 1 + $w.Length) -gt $max) { Write-Host ((' ' * $Indent) + $line) -ForegroundColor $Color; $line = $w }
+        elseif ($line) { $line += ' ' + $w }
+        else { $line = $w }
+    }
+    if ($line) { Write-Host ((' ' * $Indent) + $line) -ForegroundColor $Color }
+}
+
+function Show-Banner {
+    $line = { param($Left, $Right) '  ' + $Left + (' ' * [math]::Max(2, $UiWidth - 2 - $Left.Length - $Right.Length)) + $Right }
+    Write-Host ''
+    Write-UiRule '='
+    Write-Host (& $line "COLLECT_V3  $ScriptVersion" 'Windows DFIR triage collector') -ForegroundColor White
+    Write-Host (& $line 'BSD 3-Clause License' 'github.com/seliyyah/windows-dfir-collector') -ForegroundColor DarkGray
+    Write-UiRule '='
+}
+
+# Profiles as shown to the operator. Times are typical for a laptop writing to a USB 3 drive (lab laptop runs: Quick
+# 2 min, Deep 60 min, Full 60-130 min; Standard about 10 min before 3.4 added steps); they grow with disk speed,
+# data volume and host load. Keep them in step with the README and user guide section 4.
+$ProfileInfo = [ordered]@{
+    Quick      = @{ Label = 'Quick';       Time = 'about 2 min';    SpaceGB = 1
+                    Text = 'Live system state only: processes, network, logons, services, persistence.' }
+    Standard   = @{ Label = 'Standard';    Time = 'about 10 min';   SpaceGB = 5
+                    Text = 'Quick, plus a shadow copy of registry hives, all event logs, Prefetch, Autoruns and command history.' }
+    Deep       = @{ Label = 'Deep';        Time = '30 to 60 min';   SpaceGB = 15
+                    Text = 'Standard, plus raw NTFS files ($MFT, $J), browser and user activity, a signature scan and parsed timelines.' }
+    Full       = @{ Label = 'Full';        Time = '1 to 2 hours';   SpaceGB = 100
+                    Text = 'Deep, plus KAPE and Velociraptor collections, pagefile and hiberfil, the full Recycle Bin and the Search index.' }
+    MemoryOnly = @{ Label = 'Memory Only'; Time = '';               SpaceGB = 1
+                    Text = 'RAM capture only, plus the clock and time zone. The fastest way to preserve memory.' }
+}
+
+# A RAM capture to USB 3 ran at about 7.5 s per GB on the lab laptop (33.5 GB in 250-275 s).
+function Get-MemoryMinutes { param([int64]$RamBytes) [math]::Max(1, [math]::Ceiling($RamBytes / 1GB / 7)) }
+function Get-RequiredGB {
+    param([string]$ProfileName, [bool]$WithMemory, [int64]$RamBytes)
+    $gb = $ProfileInfo[$ProfileName].SpaceGB
+    if ($WithMemory) { $gb += [math]::Ceiling($RamBytes / 1GB * 1.1) }
+    [int]$gb
+}
+
+function Show-ProfileMenu {
+    param([int64]$RamBytes, [bool]$MemoryToolFound = $true)
+    $n = 0
+    foreach ($key in $ProfileInfo.Keys) {
+        $n++
+        $p = $ProfileInfo[$key]
+        $time = $p.Time
+        $space = '{0} GB' -f (Get-RequiredGB $key $false 0)
+        if ($key -eq 'MemoryOnly') {
+            $time = 'about {0} min' -f (Get-MemoryMinutes $RamBytes)
+            $space = '{0} GB' -f (Get-RequiredGB $key $true $RamBytes)
+        }
+        Write-Host ''
+        Write-Host ('   {0}  ' -f $n) -ForegroundColor Cyan -NoNewline
+        Write-Host ('{0,-13}' -f $p.Label) -ForegroundColor White -NoNewline
+        if ($key -eq 'MemoryOnly' -and -not $MemoryToolFound) {
+            Write-Host 'unavailable: no memory capture tool in the toolkit' -ForegroundColor DarkYellow
+        }
+        else { Write-Host ('{0,-16}{1}' -f $time, "space $space") -ForegroundColor DarkGray }
+        Write-UiWrapped -Text $p.Text -Indent 6 -Color DarkGray
+    }
+    Write-Host ''
+    Write-UiWrapped -Text 'Times are typical for a laptop writing to a USB 3 drive. A memory capture adds its own time.' -Color DarkGray
+}
+
+# One line about a drive for the operator: letter, kind (system / internal / external / network) and free space.
+function Get-DriveDescription {
+    param([string]$Path)
+    $root = [IO.Path]::GetPathRoot($Path)
+    if ($root -and $root.StartsWith('\\')) { return [pscustomobject]@{ Kind = 'network'; KindText = 'network share'; Text = 'network share'; FreeGB = $null } }
+    $letter = $root.TrimEnd('\').ToUpper()
+    $kind = 'unknown'
+    if ($letter -eq $env:SystemDrive.ToUpper()) { $kind = 'system' }
+    else {
+        # Win32_DiskDrive, not Get-Disk: the storage provider's first call took 18 s on the lab laptop, which would
+        # stall the questions. USB drives behind UASP can report InterfaceType SCSI, so MediaType and the PnP bus
+        # are checked too.
+        try {
+            foreach ($p in @(Get-CimInstance -Query "ASSOCIATORS OF {Win32_LogicalDisk.DeviceID='$letter'} WHERE AssocClass=Win32_LogicalDiskToPartition" -ErrorAction Stop)) {
+                foreach ($dd in @(Get-CimInstance -Query "ASSOCIATORS OF {Win32_DiskPartition.DeviceID='$($p.DeviceID)'} WHERE AssocClass=Win32_DiskDriveToDiskPartition" -ErrorAction Stop)) {
+                    $ext = ([string]$dd.InterfaceType -in 'USB', '1394') -or ([string]$dd.MediaType -match '^(External|Removable)') -or
+                           ([string]$dd.PNPDeviceID -match '^(USBSTOR|USB|SD|SCSI\\.*USB)')
+                    $kind = if ($ext) { 'external' } else { 'internal' }
+                }
+            }
+            if ($kind -eq 'unknown' -and (New-Object IO.DriveInfo($root)).DriveType -eq 'Removable') { $kind = 'external' }
+        } catch { }
+    }
+    $free = Get-FreeSpaceGB $Path
+    $kindText = @{ system = 'SYSTEM drive of this computer'; internal = 'internal disk'; external = 'external drive'; unknown = 'drive' }[$kind]
+    $freeText = if ($null -ne $free) { ', {0:N0} GB free' -f $free } else { '' }
+    [pscustomobject]@{ Kind = $kind; KindText = $kindText; Text = "$letter $kindText$freeText"; FreeGB = $free }
+}
+
+function Stop-GuidedSetup {
+    Write-Host ''
+    Write-UiText 'Setup cancelled. Nothing was collected.' Yellow
+    Write-Host ''
+    exit 0
+}
+# Prompt with an optional default shown in [brackets]; Enter accepts it; Q quits.
+function Read-UiAnswer {
+    param([string]$Prompt, [string]$Default = '')
+    $shown = if ($Default) { "  $Prompt [$Default]" } else { "  $Prompt" }
+    $a = Read-Host $shown
+    if ($null -eq $a) { $a = '' }
+    $a = $a.Trim()
+    if ($a -match '^(?i)(q|quit|exit)$') { Stop-GuidedSetup }
+    if (-not $a) { $a = $Default }
+    $a
+}
+function Read-UiYesNo {
+    param([string]$Prompt, [bool]$Default)
+    $hint = if ($Default) { 'Y/n' } else { 'y/N' }
+    for ($i = 0; $i -lt 20; $i++) {
+        $a = Read-UiAnswer "$Prompt ($hint)"
+        if (-not $a) { return $Default }
+        if ($a -match '^(?i)(y|yes)$') { return $true }
+        if ($a -match '^(?i)(n|no)$') { return $false }
+        Write-UiText 'Please answer Y or N.' Yellow
+    }
+    Stop-GuidedSetup
+}
+function Read-UiChoice {
+    param([string]$Prompt, [int]$Max, [string]$Default = '', [int[]]$Disabled = @(), [string]$DisabledText = '')
+    for ($i = 0; $i -lt 20; $i++) {
+        $a = Read-UiAnswer $Prompt $Default
+        $n = 0
+        if ([int]::TryParse($a, [ref]$n) -and $n -ge 1 -and $n -le $Max) {
+            if ($Disabled -contains $n) { Write-UiText $DisabledText Yellow; continue }
+            return $n
+        }
+        Write-UiText ('Please enter a number from 1 to {0}.' -f $Max) Yellow
+    }
+    Stop-GuidedSetup
+}
+
+# Quote a value for the manual-mode command line shown to the operator (cmd.exe passes double quotes through).
+function Format-UiArg { param([string]$Value) if ($Value -match '[\s&|<>^"]') { '"' + ($Value -replace '"', '') + '"' } else { $Value } }
+
+# Guided setup: five short steps, then a summary. Returns the choices; nothing is collected or written here.
+function Invoke-GuidedSetup {
+    param([string]$ToolsRoot, [string]$DefaultOutput, [string]$DefaultOperator)
+
+    $ram = 0L
+    try { $ram = [int64](Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).TotalPhysicalMemory } catch { }
+    $files = @(Get-ChildItem -LiteralPath $ToolsRoot -Recurse -File -Force -ErrorAction Ignore |
+        Where-Object { $_.FullName -notmatch '\\arm64\\' })
+    $memTool  = @($files | Where-Object { $_.Name -like 'winpmem*.exe' -or $_.Name -like 'go-winpmem*.exe' -or
+        $_.Name -like 'MagnetRAMCapture*.exe' -or $_.Name -like 'MRCv*.exe' -or $_.Name -eq 'DumpIt.exe' }).Count -gt 0
+    $sevenZip = @($files | Where-Object { $_.Name -in '7z.exe', '7za.exe' }).Count -gt 0
+    # YARA rules for the process scan come only from Tools\YARA\, so rules shipped inside other tools (LOLDrivers'
+    # driver-file rules, for example) are never offered by accident.
+    $yaraDir   = Join-Path $ToolsRoot 'YARA'
+    $yaraFiles = @($files | Where-Object { $_.Extension -in '.yar', '.yara' -and
+        $_.FullName.StartsWith($yaraDir + '\', [StringComparison]::OrdinalIgnoreCase) } | Sort-Object FullName)
+    # LOLDrivers list: a file named loldrivers*.csv/json, or the export inside a copy of the LOLDrivers repository
+    # (loldrivers.io\content\api\drivers.csv). CSV is preferred: the JSON is about 35 MB.
+    $lolFiles  = @($files | Where-Object { $_.Extension -in '.csv', '.json' -and
+        ($_.Name -like 'loldrivers*' -or $_.FullName -match '\\loldrivers\.io\\content\\api\\drivers\.(csv|json)$') } |
+        Sort-Object @{ e = { $_.Extension -ne '.csv' } }, FullName)
+    $rel = { param($f) $f.FullName.Substring($ToolsRoot.TrimEnd('\').Length).TrimStart('\') }
+
+    $g = [ordered]@{ CaseId = ''; Operator = $DefaultOperator; CollectionProfile = ''; Memory = $false; OutputPath = $DefaultOutput
+        AllowSystemDrive = $false; SpaceConfirmed = $false; DefenderQuarantine = $false; YaraRules = $null; LolDriversCsv = $null
+        Archive = $false; ArchivePassword = $null; RamBytes = $ram; Command = '' }
+
+    Write-Host ''
+    Write-Host '  GUIDED SETUP' -ForegroundColor Cyan
+    Write-UiWrapped 'Five short steps, then a summary to confirm. Press Enter to accept the value in [brackets]; type Q at any prompt to quit. Nothing is collected until you confirm.' -Color Gray
+    Write-UiWrapped 'Manual mode: run collect with parameters instead (collect /? shows examples).' -Color DarkGray
+
+    # 1. Case
+    Write-UiStep 1 5 'Case details'
+    Write-UiWrapped 'The case ID names the output folder and is recorded in the manifest. Use letters, numbers, dots, dashes or underscores, for example IR-2026-014.' -Color DarkGray
+    for ($i = 0; ; $i++) {
+        if ($i -ge 20) { Stop-GuidedSetup }
+        $id = Read-UiAnswer 'Case ID'
+        if ($id -match '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$') { $g.CaseId = $id; break }
+        if (-not $id) { Write-UiText 'A case ID is required.' Yellow }
+        else { Write-UiText 'Use only letters, numbers, dots, dashes and underscores (up to 64), starting with a letter or number.' Yellow }
+    }
+    $g.Operator = Read-UiAnswer 'Examiner' $DefaultOperator
+
+    # 2. Profile
+    Write-UiStep 2 5 'Collection profile'
+    Show-ProfileMenu -RamBytes $ram -MemoryToolFound $memTool
+    Write-Host ''
+    $keys = @($ProfileInfo.Keys)
+    $disabled = if ($memTool) { @() } else { @(5) }
+    $pick = Read-UiChoice -Prompt 'Profile (1-5)' -Max 5 -Default '2' -Disabled $disabled `
+        -DisabledText 'Memory Only needs WinPmem, Magnet RAM Capture or DumpIt in the toolkit. Choose another profile.'
+    $g.CollectionProfile = $keys[$pick - 1]
+    $isMemOnly = $g.CollectionProfile -eq 'MemoryOnly'
+
+    # 3. Memory
+    Write-UiStep 3 5 'Memory (RAM) capture'
+    $ramGB = [math]::Round($ram / 1GB)
+    if ($isMemOnly) {
+        $g.Memory = $true
+        Write-UiWrapped ('Included: the Memory Only profile captures RAM ({0} GB on this computer, about {1} min).' -f $ramGB, (Get-MemoryMinutes $ram))
+    }
+    elseif (-not $memTool) {
+        Write-UiWrapped 'No memory capture tool (WinPmem, Magnet RAM Capture or DumpIt) was found in the toolkit, so memory will not be captured.' -Color DarkYellow
+    }
+    else {
+        Write-UiWrapped ('Memory holds running processes, network connections, injected code and keys that are lost at shutdown. This computer has {0} GB of RAM: the capture runs first, takes about {1} min and needs about {2} GB of free space.' -f $ramGB, (Get-MemoryMinutes $ram), [math]::Ceiling($ram / 1GB * 1.1)) -Color DarkGray
+        $g.Memory = Read-UiYesNo 'Capture memory?' ($g.CollectionProfile -in 'Deep', 'Full')
+    }
+
+    # 4. Output
+    Write-UiStep 4 5 'Output location'
+    Write-UiWrapped 'A new folder named <case>_<computer>_<UTC time> is created here. Use an external or network drive: writing to this computer''s own disks overwrites deleted data that may be evidence.' -Color DarkGray
+    $need = Get-RequiredGB $g.CollectionProfile $g.Memory $ram
+    Write-UiText ('Default: {0}' -f $DefaultOutput) DarkGray
+    Write-UiText ('         {0}' -f (Get-DriveDescription $DefaultOutput).Text) DarkGray
+    for ($i = 0; ; $i++) {
+        if ($i -ge 20) { Stop-GuidedSetup }
+        $path = Read-UiAnswer 'Output folder' $DefaultOutput
+        if ($path -notmatch '^([A-Za-z]:\\|\\\\[^\\]+\\[^\\]+)') {
+            Write-UiText 'Enter a full path, for example F:\Collections or \\server\share\Collections.' Yellow; continue
+        }
+        try { $path = [IO.Path]::GetFullPath($path).TrimEnd('\') } catch { Write-UiText 'That is not a valid folder path.' Yellow; continue }
+        $root = [IO.Path]::GetPathRoot($path)
+        if (-not $root -or -not (Test-Path -LiteralPath $root)) { Write-UiText "Drive or share $root is not available." Yellow; continue }
+        if ($path -eq $root.TrimEnd('\')) { $path = Join-Path $root 'Collections' }
+        $d = Get-DriveDescription $path
+        Write-UiText ('Selected: {0}  ({1})' -f $path, $d.Text) White
+        $allow = $false
+        if ($d.Kind -in 'system', 'internal') {
+            Write-UiWrapped ('Warning: this is the {0}. Writing here overwrites deleted data on a disk you are collecting.' -f $d.KindText) -Color Yellow
+            if (-not (Read-UiYesNo 'Write here anyway?' $false)) { continue }
+            $allow = $true
+        }
+        $spaceOk = $false
+        if ($null -ne $d.FreeGB -and $d.FreeGB -lt $need) {
+            Write-UiWrapped ('Only {0:N0} GB is free; this collection needs about {1} GB.' -f $d.FreeGB, $need) -Color Yellow
+            if (-not (Read-UiYesNo 'Use this folder anyway?' $false)) { continue }
+            $spaceOk = $true
+        }
+        $g.OutputPath = $path; $g.AllowSystemDrive = $allow; $g.SpaceConfirmed = $spaceOk
+        break
+    }
+
+    # 5. Options (only those that apply to the chosen profile)
+    Write-UiStep 5 5 'Options'
+    $level = @{ Quick = 1; Standard = 2; Deep = 3; Full = 4; MemoryOnly = 0 }[$g.CollectionProfile]
+    if ($level -ge 2) {
+        Write-Host '  Defender quarantine' -ForegroundColor White
+        Write-UiWrapped 'Copies the files Microsoft Defender quarantined. They are live malware samples: handle the collection as malware and protect the archive with a password.' -Indent 4 -Color DarkGray
+        $g.DefenderQuarantine = Read-UiYesNo 'Include the Defender quarantine?' $false
+        Write-Host ''
+    }
+    if ($level -ge 2 -and $lolFiles.Count) {
+        Write-Host '  LOLDrivers matching' -ForegroundColor White
+        Write-UiWrapped ('Matches the hashes of this computer''s drivers against the LOLDrivers list found in the toolkit ({0}). Offline; adds a few seconds.' -f (& $rel $lolFiles[0])) -Indent 4 -Color DarkGray
+        if (Read-UiYesNo 'Match drivers against LOLDrivers?' $true) { $g.LolDriversCsv = $lolFiles[0].FullName }
+        Write-Host ''
+    }
+    if ($level -ge 4 -and $yaraFiles.Count) {
+        Write-Host '  YARA process scan' -ForegroundColor White
+        Write-UiWrapped 'Scans the memory of running processes with YARA rules found in the toolkit. Slow, and security software may raise an alert.' -Indent 4 -Color DarkGray
+        if (Read-UiYesNo 'Run the YARA scan?' $false) {
+            $y = 1
+            if ($yaraFiles.Count -gt 1) {
+                for ($k = 0; $k -lt $yaraFiles.Count; $k++) { Write-UiText ('  {0}  {1}' -f ($k + 1), (& $rel $yaraFiles[$k])) }
+                $y = Read-UiChoice -Prompt ('Rules file (1-{0})' -f $yaraFiles.Count) -Max $yaraFiles.Count -Default '1'
+            }
+            $g.YaraRules = $yaraFiles[$y - 1].FullName
+        }
+        Write-Host ''
+    }
+    Write-Host '  Archive' -ForegroundColor White
+    if ($sevenZip) {
+        Write-UiWrapped 'Packs the finished collection into one 7-Zip file, which can be encrypted with a password (AES-256).' -Indent 4 -Color DarkGray
+    }
+    else {
+        Write-UiWrapped '7-Zip is not in the toolkit, so the archive would be a .zip without encryption (2 GB limit).' -Indent 4 -Color DarkGray
+    }
+    $g.Archive = Read-UiYesNo 'Create an archive when done?' $false
+    if ($g.Archive -and $sevenZip -and (Read-UiYesNo 'Protect the archive with a password?' $true)) {
+        Write-UiWrapped '7-Zip receives the password on its command line, which process logging (Sysmon, event 4688, EDR) can record: use a password unique to this case.' -Indent 4 -Color DarkGray
+        for ($i = 0; ; $i++) {
+            if ($i -ge 5) { Write-UiText 'No password set; the archive will not be encrypted.' Yellow; break }
+            $p1 = Read-Host '  Password' -AsSecureString
+            $p2 = Read-Host '  Confirm password' -AsSecureString
+            $ok = $false
+            $b1 = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($p1); $b2 = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($p2)
+            try {
+                $s1 = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($b1); $s2 = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($b2)
+                $ok = ($s1.Length -gt 0 -and $s1 -ceq $s2)
+            }
+            finally {
+                [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b1); [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b2)
+                $s1 = $null; $s2 = $null
+            }
+            if ($ok) { $g.ArchivePassword = $p1; break }
+            Write-UiText 'The passwords were empty or did not match. Try again.' Yellow
+        }
+    }
+    if ($g.DefenderQuarantine -and -not $g.ArchivePassword) {
+        Write-UiWrapped 'Note: the collection will hold malware samples without password protection.' -Color Yellow
+    }
+
+    # Manual-mode equivalent (no password: it can't be typed on a command line safely).
+    $cmd = @('collect', '-CaseId', (Format-UiArg $g.CaseId))
+    if ($g.Operator -ne $DefaultOperator) { $cmd += @('-Operator', (Format-UiArg $g.Operator)) }
+    $cmd += @('-CollectionProfile', $g.CollectionProfile)
+    if ($g.Memory -and -not $isMemOnly) { $cmd += '-Memory' }
+    $cmd += @('-OutputPath', (Format-UiArg $g.OutputPath))
+    if ($g.AllowSystemDrive) { $cmd += '-AllowSystemDrive' }
+    if ($g.DefenderQuarantine) { $cmd += '-DefenderQuarantine' }
+    if ($g.LolDriversCsv) { $cmd += @('-LolDriversCsv', (Format-UiArg $g.LolDriversCsv)) }
+    if ($g.YaraRules) { $cmd += @('-YaraRules', (Format-UiArg $g.YaraRules)) }
+    if ($g.Archive) { $cmd += '-Archive' }
+    $g.Command = $cmd -join ' '
+
+    # Summary
+    $prof = $ProfileInfo[$g.CollectionProfile]
+    $time = if ($isMemOnly) { 'about {0} min' -f (Get-MemoryMinutes $ram) }
+            elseif ($g.Memory) { '{0}, plus about {1} min for memory' -f $prof.Time, (Get-MemoryMinutes $ram) }
+            else { $prof.Time }
+    $opts = @()
+    if ($g.DefenderQuarantine) { $opts += 'Defender quarantine' }
+    if ($g.LolDriversCsv) { $opts += 'LOLDrivers matching' }
+    if ($g.YaraRules) { $opts += 'YARA scan' }
+    if ($g.Archive) { $opts += $(if ($g.ArchivePassword) { 'archive (password protected)' } elseif ($sevenZip) { 'archive (no password)' } else { 'archive (.zip, no encryption)' }) }
+    Write-Host ''
+    Write-Host '  READY TO COLLECT' -ForegroundColor Cyan
+    Write-UiRule
+    Write-UiField 'Case ID' $g.CaseId
+    Write-UiField 'Examiner' $g.Operator
+    Write-UiField 'Computer' $env:COMPUTERNAME
+    Write-UiField 'Profile' $prof.Label
+    Write-UiField 'Memory capture' $(if ($g.Memory) { 'Yes ({0} GB of RAM)' -f $ramGB } else { 'No' })
+    Write-UiField 'Output' $g.OutputPath
+    Write-UiField '' (Get-DriveDescription $g.OutputPath).Text 'DarkGray'
+    Write-UiField 'Options' $(if ($opts.Count) { $opts -join ', ' } else { 'none' })
+    Write-UiField 'Estimated time' $time
+    Write-UiField 'Space needed' ('about {0} GB' -f $need)
+    Write-UiRule
+    Write-UiText 'The same collection in manual mode (no prompts except the license):' DarkGray
+    Write-Host ('    ' + $g.Command) -ForegroundColor Gray     # one line, so it copies cleanly
+    if ($g.ArchivePassword) { Write-UiWrapped '(Archive passwords are never shown or logged. In manual mode, use -ArchivePassword from a PowerShell window.)' -Indent 4 -Color DarkGray }
+    Write-Host ''
+    if (-not (Read-UiYesNo 'Start the collection now?' $true)) { Stop-GuidedSetup }
+    $g
 }
 
 function New-Section { param([string]$Title) "`r`n=== $Title ===" }
@@ -425,6 +812,7 @@ authority to collect data from the system, and for storing, transferring and
 destroying what it collects lawfully. The third-party tools it runs are not
 part of this software and are used under their own licenses.
 '@
+Show-Banner
 $script:LicenseAccepted = $null
 if ($AcceptLicense) {
     $script:LicenseAccepted = [ordered]@{ Method = '-AcceptLicense parameter'; Utc = (Get-UtcStamp) }
@@ -448,7 +836,7 @@ else {
 Write-Log ('License terms (BSD 3-Clause and authorized-use notice) accepted by {0} via {1}' -f $Operator, $script:LicenseAccepted.Method)
 
 if (-not (Test-IsAdmin)) {
-    Write-Log 'This script must run from an elevated (Administrator) session.' 'ERROR'; exit 1
+    Write-Log 'Collect_v3 needs administrator rights. Start it with collect.cmd (it asks Windows for permission), or from a terminal opened with "Run as administrator".' 'ERROR'; exit 1
 }
 if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) {
     Write-Log "32-bit PowerShell on a 64-bit OS (WOW64 redirection). Use: $env:windir\sysnative\WindowsPowerShell\v1.0\powershell.exe" 'ERROR'
@@ -484,29 +872,52 @@ $ExfilTools = @(
     @{ Token = 'S3 Browser' }, @{ Token = 'Cyberduck' }
 )
 
-# --- Profile selection ---
-$Levels = @{ Quick = 1; Standard = 2; Deep = 3; Full = 4 }
-if (-not $CollectionProfile) {
-    if ($NonInteractive) { Write-Log '-CollectionProfile is required with -NonInteractive.' 'ERROR'; exit 1 }
-    Write-Host ''
-    Write-Host '1 - Quick    (volatile only)'
-    Write-Host '2 - Standard (+ VSS, hives, event logs, prefetch, config)'
-    Write-Host '3 - Deep     (+ raw NTFS, user artifacts, parsers)'
-    Write-Host '4 - Full     (+ KAPE / Velociraptor)'
-    do { $sel = (Read-Host 'Select profile [1-4]').Trim() } until ($sel -in '1', '2', '3', '4')
-    $CollectionProfile = @('Quick', 'Standard', 'Deep', 'Full')[[int]$sel - 1]
-}
-
 # --- Paths ---
 $ToolkitRoot = $PSScriptRoot
 if (-not $ToolkitRoot) { $ToolkitRoot = (Get-Location).Path }
 
-$CollectionsBase = if ($OutputPath) { $OutputPath } else { Join-Path $ToolkitRoot 'Collections' }
-$CollectionsBase = [IO.Path]::GetFullPath($CollectionsBase).TrimEnd('\')
-
 $ToolsRoot = if ($ToolsPath) { $ToolsPath }
 elseif (Test-Path -LiteralPath (Join-Path $ToolkitRoot 'Tools')) { Join-Path $ToolkitRoot 'Tools' }
 else { $ToolkitRoot }
+
+# --- Guided setup (no parameters) or profile selection (manual mode) ---
+$Levels = @{ MemoryOnly = 0; Quick = 1; Standard = 2; Deep = 3; Full = 4 }
+$script:SpaceConfirmed = $false
+if ($GuidedMode) {
+    $g = Invoke-GuidedSetup -ToolsRoot $ToolsRoot -DefaultOutput (Join-Path $ToolkitRoot 'Collections') -DefaultOperator $Operator
+    $CaseId = $g.CaseId; $Operator = $g.Operator; $CollectionProfile = $g.CollectionProfile; $OutputPath = $g.OutputPath
+    $Memory = [switch]$g.Memory; $AllowSystemDrive = [switch]$g.AllowSystemDrive; $DefenderQuarantine = [switch]$g.DefenderQuarantine
+    $Archive = [switch]$g.Archive; $ArchivePassword = $g.ArchivePassword; $YaraRules = $g.YaraRules; $LolDriversCsv = $g.LolDriversCsv
+    $script:SpaceConfirmed = $g.SpaceConfirmed
+    # Recorded in the manifest's Parameters exactly as if they had been typed (the password never is).
+    foreach ($k in 'CaseId', 'Operator', 'CollectionProfile', 'OutputPath', 'YaraRules', 'LolDriversCsv') {
+        if ($g[$k]) { $PSBoundParameters[$k] = $g[$k] }
+    }
+    foreach ($k in 'Memory', 'AllowSystemDrive', 'DefenderQuarantine', 'Archive') { if ($g[$k]) { $PSBoundParameters[$k] = [switch]$true } }
+    Write-Log 'Launch mode: guided setup'
+    Write-Log "Manual-mode equivalent: $($g.Command)"
+    Write-Host ''
+}
+else {
+    Write-Log 'Launch mode: manual (parameters)'
+    if (-not $CollectionProfile) {
+        if ($NonInteractive) { Write-Log '-CollectionProfile is required with -NonInteractive.' 'ERROR'; exit 1 }
+        Write-Host ''
+        Write-Host '  COLLECTION PROFILE' -ForegroundColor Cyan
+        Write-UiRule
+        $menuRam = 0L
+        try { $menuRam = [int64](Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).TotalPhysicalMemory } catch { }
+        Show-ProfileMenu -RamBytes $menuRam
+        Write-Host ''
+        do { $sel = (Read-Host '  Profile (1-5)').Trim() } until ($sel -in '1', '2', '3', '4', '5')
+        $CollectionProfile = @($ProfileInfo.Keys)[[int]$sel - 1]
+    }
+}
+# Memory Only always captures memory (and runs nothing else but the clock and time zone record).
+if ($CollectionProfile -eq 'MemoryOnly') { $Memory = [switch]$true }
+
+$CollectionsBase = if ($OutputPath) { $OutputPath } else { Join-Path $ToolkitRoot 'Collections' }
+$CollectionsBase = [IO.Path]::GetFullPath($CollectionsBase).TrimEnd('\')
 
 # --- Footprint: do not write onto the evidence disk unless explicitly allowed ---
 $outRoot = [IO.Path]::GetPathRoot($CollectionsBase)
@@ -581,15 +992,15 @@ if ($outInfo -and $outInfo.Internal -and $outInfo.Letter -ne ($env:SystemDrive).
 $RamBytes = 0
 try { $RamBytes = [int64](Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).TotalPhysicalMemory } catch {}
 
-$requiredGB = @{ Quick = 1; Standard = 5; Deep = 15; Full = 100 }[$CollectionProfile]
-if ($Memory) { $requiredGB += [math]::Ceiling($RamBytes / 1GB * 1.1) }
+$requiredGB = Get-RequiredGB $CollectionProfile $Memory.IsPresent $RamBytes
 $freeGB = Get-FreeSpaceGB $CollectionsBase
 if ($null -eq $freeGB) {
     Write-Log "Free space on '$CollectionsBase' could not be determined (UNC path?). Recommended: $requiredGB GB." 'WARN'
 }
 elseif ($freeGB -lt $requiredGB) {
     Write-Log "Only $freeGB GB free; recommended $requiredGB GB for '$CollectionProfile'." 'WARN'
-    if (-not (Confirm-Continue 'Continue anyway?')) { Write-Log 'Aborting: insufficient space.' 'ERROR'; exit 3 }
+    if ($script:SpaceConfirmed) { Write-Log 'Continuing: confirmed in guided setup.' 'WARN' }
+    elseif (-not (Confirm-Continue 'Continue anyway?')) { Write-Log 'Aborting: insufficient space.' 'ERROR'; exit 3 }
 }
 
 # ===================================================================
@@ -815,6 +1226,12 @@ $Tool = [ordered]@{
     Velociraptor  = Find-Tool @('velociraptor*.exe')
 }
 
+if ($CollectionProfile -eq 'MemoryOnly' -and -not ($Tool.Winpmem -or $Tool.Magnet -or $Tool.DumpIt)) {
+    Write-Log 'Memory Only needs WinPmem, Magnet RAM Capture or DumpIt in the toolkit, and none was found. Nothing was collected; add a memory tool under Tools\ or choose another profile.' 'ERROR'
+    Add-LogLine $null
+    exit 1
+}
+
 # Use the batch file that ships next to the chosen RECmd (its schema matches that RECmd version).
 if ($Tool.RECmd) {
     $reb = Join-Path $Tool.RECmd.DirectoryName 'BatchExamples\Kroll_Batch.reb'
@@ -854,7 +1271,7 @@ $script:Seq      = 0
 function Add-Collector {
     param(
         [Parameter(Mandatory)][int]$Phase,
-        [Parameter(Mandatory)][ValidateRange(1, 4)][int]$Level,
+        [Parameter(Mandatory)][ValidateRange(0, 4)][int]$Level,   # 0 = also in Memory Only
         [Parameter(Mandatory)][string]$Name,
         [Parameter(Mandatory)][scriptblock]$Action,
         [string]$Out,
@@ -1284,7 +1701,7 @@ function Remove-Vss {
 # ===================================================================
 
 # ---------- PHASE 1: MEMORY ----------
-Add-Collector -Phase 1 -Level 1 -Name 'Memory acquisition' -Format None -Needs 'Winpmem', 'Magnet', 'DumpIt' -Enabled:$Memory.IsPresent -Action {
+Add-Collector -Phase 1 -Level 0 -Name 'Memory acquisition' -Format None -Needs 'Winpmem', 'Magnet', 'DumpIt' -Enabled:$Memory.IsPresent -Action {
     $memDir = Join-Path $Ctx.Root 'Memory'
     $img = Join-Path $memDir ('{0}_{1}.raw' -f $env:COMPUTERNAME, $Ctx.Stamp)
     $log = Join-Path $memDir 'acquisition.log'
@@ -1301,7 +1718,7 @@ Add-Collector -Phase 1 -Level 1 -Name 'Memory acquisition' -Format None -Needs '
 }
 
 # ---------- PHASE 2: TIME + NETWORK (Quick) ----------
-Add-Collector -Phase 2 -Level 1 -Name 'Time, timezone, clock sync' -Out 'System\time.txt' -Action {
+Add-Collector -Phase 2 -Level 0 -Name 'Time, timezone, clock sync' -Out 'System\time.txt' -Action {
     $tz = [TimeZoneInfo]::Local
     'UtcNow    : ' + [DateTime]::UtcNow.ToString('o')
     'LocalNow  : ' + [DateTimeOffset]::Now.ToString('o')
@@ -3081,6 +3498,7 @@ Set-ManifestField $mScript 'SHA256'     { $scriptSha }
 Set-ManifestField $mScript 'Parameters' { $bound }
 Set-ManifestField $mScript 'License'    { 'BSD-3-Clause' }
 Set-ManifestField $mScript 'LicenseAccepted' { $script:LicenseAccepted }
+Set-ManifestField $mScript 'LaunchMode' { if ($GuidedMode) { 'guided setup' } else { 'manual (parameters)' } }
 
 $mCase = New-Object System.Collections.Specialized.OrderedDictionary
 Set-ManifestField $mCase 'CaseId'   { $CaseId }
@@ -4448,6 +4866,13 @@ function Write-AnalysisReadmes {
     if ($kept) { Write-Log ('    {0} folder(s) already had a file named ANALYSIS_README.txt; left unchanged' -f $kept) }
 }
 
+# Top-level folders the profile left empty (for example KAPE\ in a Standard run, or nearly all in Memory Only) are
+# removed so the collection shows only what was collected. Only empty folders made by this script are touched.
+foreach ($f in 'Memory', 'System', 'Network', 'Processes', 'Persistence', 'Security', 'Disk', 'EventLogs', 'Tools', 'Parsed', 'KAPE', 'Velociraptor') {
+    $dir = Join-Path $CollectionRoot $f
+    try { if ([IO.Directory]::Exists($dir) -and -not [IO.Directory]::GetFileSystemEntries($dir).Length) { [IO.Directory]::Delete($dir) } } catch { }
+}
+
 if (-not $NoAnalysisReadme) {
     try { Write-AnalysisReadmes -Root $CollectionRoot }
     catch { Write-Log "Analysis READMEs failed: $($_.Exception.Message)" 'WARN' }
@@ -4519,12 +4944,18 @@ if ($Archive) {
 # ===================================================================
 
 Write-Host ''
-Write-Host '================================='
-Write-Host ' COLLECTION COMPLETE'
-Write-Host '================================='
-Write-Host "Output folder : $CollectionRoot"
-Write-Host "Results       : $($counts -join ', ')"
-Write-Host "FileHashes.csv SHA256 (record this off-box): $hashOfHashes"
-if ($archivePath) { Write-Host "Archive       : $archivePath" }
+Write-UiRule '='
+Write-Host '  COLLECTION COMPLETE' -ForegroundColor Green
+Write-UiRule '='
+Write-UiField 'Case ID' $CaseId
+Write-UiField 'Profile' $ProfileInfo[$CollectionProfile].Label
+Write-UiField 'Output folder' $CollectionRoot
+Write-UiField 'Results' ($counts -join ', ') $(if ($counts -match '^(FAIL|WARN)') { 'Yellow' } else { 'White' })
+Write-UiField 'Duration' ('{0:N0} min' -f ([DateTime]::UtcNow - $ScriptStartUtc).TotalMinutes)
+if ($archivePath) { Write-UiField 'Archive' $archivePath }
+Write-UiRule
+Write-UiText 'SHA256 of FileHashes.csv (record this outside this computer):' DarkGray
+Write-UiText $hashOfHashes White
+Write-UiText 'Per-step results: CollectorResults.csv. Full log: Collection.log.' DarkGray
 Write-Host ''
 Restore-QuickEdit

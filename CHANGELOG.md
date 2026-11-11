@@ -2,6 +2,55 @@
 
 All notable changes to `Collect_v3.ps1`. Format based on [Keep a Changelog](https://keepachangelog.com/); versions follow [Semantic Versioning](https://semver.org/).
 
+## [3.8.0]
+
+### Added
+- **`collect.cmd`, a launcher.** Type `collect` on the toolkit drive, or double-click it. It starts Windows PowerShell 5.1 by full path (64-bit even from a 32-bit prompt), with `-NoProfile` so the profile scripts of the computer being collected never run, and with the execution policy bypassed for that one process only; no setting changes. It can sit next to `Collect_v3.ps1` or at the drive root with the toolkit one folder below. `collect /?` prints usage and examples.
+- **Guided setup.** Started with no parameters (through `collect` or directly), the script shows a banner and the unchanged license prompt, then five short steps:
+  1. Case ID (validated) and examiner.
+  2. Profile, with a description, typical time and space for each.
+  3. Memory capture, with this computer's RAM size, the time it takes and the space it needs.
+  4. Output folder, with the drive's type and free space. It warns before writing to this computer's own disks or when space is short.
+  5. Only the options that apply to the chosen profile.
+
+  Enter accepts the suggested value, Q quits at any prompt, and a summary with estimated time and space must be confirmed before anything is collected or written. The summary shows the equivalent manual-mode command, which `Collection.log` also records. Guided choices are recorded in `manifest.json` (`Script.Parameters`) as if they had been typed; the archive password never is.
+  - When not elevated, guided setup asks Windows for administrator rights (the UAC prompt) and opens the collection in a new window, which stays open at the end so the summary can be read.
+  - The options it can offer: YARA rules come from `Tools\YARA\` (rules inside other tools aren't offered). A LOLDrivers export is found by name (`loldrivers*.csv/json`) or at the repository's `loldrivers.io\content\api\drivers.csv`. The archive password is typed twice, hidden, with a note that 7-Zip receives it on its command line.
+- **`MemoryOnly` profile:** a RAM image plus `System\time.txt` (clock, time zone, time sync), nothing else. It implies `-Memory`, and stops with an error before collecting if no memory tool is in the toolkit. The memory and clock steps are now level 0, so every profile still runs them as before.
+- `manifest.json` records `Script.LaunchMode` (`guided setup` or `manual (parameters)`), and the log says which mode was used.
+
+### Changed
+- **Manual mode is unchanged**: any parameter means no questions apart from the license (none with `-AcceptLicense`) and the existing warnings. Without `-CollectionProfile`, the profile menu is now the same five-option menu guided setup uses.
+- New look for the console: a banner at the start, and an end-of-run summary showing case, profile, output folder, results (in yellow when a step failed or warned), duration and the FileHashes.csv hash.
+- Top-level output folders a profile leaves empty (for example `KAPE\` and `Velociraptor\` in a Standard run) are removed at the end, before the READMEs are written and the files hashed.
+- The "needs administrator rights" error now says how to start it: `collect` with no parameters, or an elevated terminal.
+- Typical times in the README and user guide updated from lab-laptop runs: Deep 30–60 min (was 30–40), Full 1–2 hours (was 60–100 min).
+- `.gitattributes` keeps `.cmd` and `.bat` files CRLF.
+
+### Documentation
+- README: Quick start rewritten around `collect` (guided and manual), the Memory Only row, the "Guided or manual" feature, `collect.cmd` in the repository layout.
+- User guide: section 1 now explains both modes (1.1 Guided setup, 1.2 Manual mode); Memory Only in sections 1, 4 and 5; `collect.cmd`, `Tools\YARA\` and the LOLDrivers repository in the section 3 layout; new troubleshooting rows (administrator rights, `.\collect` in PowerShell, a declined UAC prompt, launcher not finding the script, Memory Only without a tool, options not offered).
+- Tools README: the `YARA\` and `LOLDrivers-main\` folders and where to get LOLDrivers.
+
+### Verified
+- Guided setup driven by scripted answers in six scenarios:
+  - Full with memory, LOLDrivers and a password-protected archive.
+  - Invalid case IDs, profile numbers, relative and malformed paths, and yes/no answers re-asked with a clear message, then Memory Only.
+  - Quitting with Q, and declining at the summary (both exit without collecting).
+  - A toolkit without a memory tool (Memory Only refused, the memory step explains why), with two YARA files in `Tools\YARA\`, one elsewhere that isn't offered, and a mismatched then matching password.
+  - The system drive as output, accepted, with `-AllowSystemDrive` in the command.
+- The real script up to the point where the collection folder would be created, with the admin check stubbed and answers scripted:
+  - In guided mode, the choices became the script's settings and `Script.Parameters`, and the log held the license line, launch mode and equivalent command.
+  - A declined license still exits.
+  - Manual mode works with `-CollectionProfile MemoryOnly` and with the new profile menu.
+- `collect.cmd`:
+  - `/?`.
+  - Finding the script beside it, or one folder down even with a space in the folder name; "not found" and "more than one copy" messages.
+  - The non-elevated manual-mode message.
+  - Arguments with spaces passed through, with `-NoProfile`.
+- Guided setup takes about 3 seconds of its own: drive types come from `Win32_DiskDrive` because the storage provider's first `Get-Disk` call took 18 seconds on the lab laptop.
+- **Not yet verified:** the UAC prompt and the new elevated window, an interactive guided run on a real console, a full Memory Only collection, and the empty-folder cleanup in a real run.
+
 ## [3.7.0]
 
 ### Added
