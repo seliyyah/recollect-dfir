@@ -23,13 +23,14 @@ All notable changes to `Collect_v3.ps1`. Format based on [Keep a Changelog](http
 - **Manual mode is unchanged**: any parameter means no questions apart from the license (none with `-AcceptLicense`) and the existing warnings. Without `-CollectionProfile`, the profile menu is now the same five-option menu guided setup uses.
 - New look for the console: a banner at the start, and an end-of-run summary showing case, profile, output folder, results (in yellow when a step failed or warned), duration and the FileHashes.csv hash.
 - Top-level output folders a profile leaves empty (for example `KAPE\` and `Velociraptor\` in a Standard run) are removed at the end, before the READMEs are written and the files hashed.
+- **QuickEdit (a click in the window pausing the run) is now turned off as soon as setup ends.** It used to be turned off only after the drive and free-space checks, which can take half a minute. A click right after confirming the guided summary paused the first live guided run for 2 minutes, until Escape was pressed. A "Preparing the collection" line now shows during those checks. QuickEdit stays on during the questions, so the summary's command can be copied, and the console gets it back if the run stops before collecting.
 - The "needs administrator rights" error now says how to start it: `collect` with no parameters, or an elevated terminal.
 - Typical times in the README and user guide updated from lab-laptop runs: Deep 30–60 min (was 30–40), Full 1–2 hours (was 60–100 min).
 - `.gitattributes` keeps `.cmd` and `.bat` files CRLF.
 
 ### Documentation
 - README: Quick start rewritten around `collect` (guided and manual), the Memory Only row, the "Guided or manual" feature, `collect.cmd` in the repository layout.
-- User guide: section 1 now explains both modes (1.1 Guided setup, 1.2 Manual mode); Memory Only in sections 1, 4 and 5; `collect.cmd`, `Tools\YARA\` and the LOLDrivers repository in the section 3 layout; new troubleshooting rows (administrator rights, `.\collect` in PowerShell, a declined UAC prompt, launcher not finding the script, Memory Only without a tool, options not offered).
+- User guide: section 1 now explains how to launch `collect.cmd` from PowerShell, Command Prompt or File Explorer, including how to switch to the toolkit drive in each (1.1), then both modes (1.2 Guided setup, 1.3 Manual mode); Memory Only in sections 1, 4 and 5; `collect.cmd`, `Tools\YARA\` and the LOLDrivers repository in the section 3 layout; new troubleshooting rows (administrator rights, `.\collect` in PowerShell, a declined UAC prompt, launcher not finding the script, Memory Only without a tool, options not offered).
 - Tools README: the `YARA\` and `LOLDrivers-main\` folders and where to get LOLDrivers.
 
 ### Verified
@@ -49,7 +50,8 @@ All notable changes to `Collect_v3.ps1`. Format based on [Keep a Changelog](http
   - The non-elevated manual-mode message.
   - Arguments with spaces passed through, with `-NoProfile`.
 - Guided setup takes about 3 seconds of its own: drive types come from `Win32_DiskDrive` because the storage provider's first `Get-Disk` call took 18 seconds on the lab laptop.
-- **Not yet verified:** the UAC prompt and the new elevated window, an interactive guided run on a real console, a full Memory Only collection, and the empty-folder cleanup in a real run.
+- **A live guided run** started from a non-elevated PowerShell window on the lab laptop: the Windows permission prompt, the new elevated window, then guided setup choosing Quick, a custom examiner name and an archive. Result: 28 OK, 1 expected skip (memory not chosen). The log and `manifest.json` show the guided launch mode, the equivalent command and the choices as parameters. The six empty top-level folders were removed; all 40 files were hashed; the archive's SHA-256 matched; the password is in neither the log nor the manifest.
+- **Not yet verified:** a full Memory Only collection, and the earlier QuickEdit switch-off in a live run.
 
 ## [3.7.0]
 

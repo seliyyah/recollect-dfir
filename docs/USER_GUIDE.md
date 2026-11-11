@@ -19,19 +19,47 @@ There are two ways to start a collection:
 | **Questions** | License, then five short steps and a summary to confirm | Only the license (none with `-AcceptLicense`) |
 | **Best for** | Most collections, and anyone new to the tool | Experienced users, scripts, repeatable procedures |
 
-### 1.1 Guided setup (recommended)
+### 1.1 How to launch `collect.cmd`
 
-Open a Command Prompt, switch to the toolkit drive and type `collect`. Replace `X:` with your toolkit drive's letter:
+Replace `X:` with your toolkit drive's letter: File Explorer → **This PC** shows it. Use whichever of these suits you; they all do the same thing.
 
-```bat
-X:
-cd \Toolkit
-collect
+**Which window am I in?** Windows Terminal can open either PowerShell or Command Prompt. Look at the prompt:
+- `PS C:\Users\you>` means **PowerShell**.
+- `C:\Users\you>` (no `PS`) means **Command Prompt**.
+
+**Easiest: one line, from any folder, in either window**
+
+```powershell
+X:\Toolkit\collect.cmd
 ```
 
-In PowerShell, type `.\collect` instead: PowerShell doesn't run files from the current folder without `.\`. You can also double-click `collect.cmd` in Windows Explorer.
+**File Explorer, no typing:** open `X:\Toolkit` and double-click **`collect.cmd`**.
 
-`collect.cmd` can sit next to `Collect_v3.ps1`, or at the root of the drive with the toolkit in a folder one level below it (for example `X:\collect.cmd` with `X:\Toolkit\`). In the second case, typing `X:` then `collect` is all it takes.
+**PowerShell, from the toolkit folder**
+
+```powershell
+X:                # switch to the toolkit drive; the prompt becomes PS X:\>
+cd \Toolkit       # go into the toolkit folder; the prompt becomes PS X:\Toolkit>
+.\collect         # PowerShell needs .\ to run a file from the current folder
+```
+
+`cd X:\Toolkit` does the first two steps at once. Typing plain `collect` in PowerShell gives *"The command collect was not found, but does exist in the current location"*. That's PowerShell's safety rule; add the `.\`.
+
+**Command Prompt, from the toolkit folder**
+
+```bat
+X:                &rem switch to the toolkit drive; the prompt becomes X:\>
+cd \Toolkit       &rem go into the toolkit folder; the prompt becomes X:\Toolkit>
+collect           &rem no .\ needed in Command Prompt
+```
+
+In Command Prompt, `cd X:\Toolkit` on its own does **not** change drives. Type `X:` first, or use `cd /d X:\Toolkit`.
+
+**Then:** started without parameters, `collect` asks Windows for permission (choose **Yes**), and the guided setup opens in a new window. For manual mode, open the window with *Run as administrator* first (right-click PowerShell, Command Prompt or Windows Terminal → *Run as administrator*) and add parameters to any of the commands above, for example `X:\Toolkit\collect.cmd -CaseId IR-001 -CollectionProfile Standard`.
+
+**Shorter still:** `collect.cmd` also works at the root of the drive, with the toolkit in a folder one level below it (`X:\collect.cmd` next to `X:\Toolkit\`). Then `X:\collect` from anywhere, or a double-click on the drive itself, is all it takes.
+
+### 1.2 Guided setup (recommended)
 
 After the license terms, the setup asks:
 
@@ -47,7 +75,7 @@ A summary follows: case, examiner, computer, profile, memory, output drive, opti
 
 Guided runs record their choices in `manifest.json` (`Script.Parameters`) as if they had been typed, and `Script.LaunchMode` says which mode was used. The archive password is never displayed, logged or recorded.
 
-### 1.2 Manual mode
+### 1.3 Manual mode
 
 Give `collect` (or `Collect_v3.ps1`) any parameter and it asks no questions apart from the license and the warnings below. Open a terminal with *Run as administrator* and go to the toolkit folder:
 

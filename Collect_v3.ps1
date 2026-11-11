@@ -916,6 +916,12 @@ else {
 # Memory Only always captures memory (and runs nothing else but the clock and time zone record).
 if ($CollectionProfile -eq 'MemoryOnly') { $Memory = [switch]$true }
 
+# QuickEdit off as soon as the questions are over (it stays on during them, so the summary's command can be copied).
+# From here on a stray click must not pause the run: the drive and space checks below can take half a minute.
+if (Disable-QuickEdit) { Write-Log 'Console QuickEdit turned off for this run (a click in the window can no longer pause collection); restored at the end' }
+Write-Host ''
+Write-UiText 'Preparing the collection: checking drives and free space...' DarkGray
+
 $CollectionsBase = if ($OutputPath) { $OutputPath } else { Join-Path $ToolkitRoot 'Collections' }
 $CollectionsBase = [IO.Path]::GetFullPath($CollectionsBase).TrimEnd('\')
 
@@ -924,7 +930,7 @@ $outRoot = [IO.Path]::GetPathRoot($CollectionsBase)
 if ($outRoot -ieq ($env:SystemDrive + '\')) {
     Write-Log "Output is on the SYSTEM drive ($outRoot). This overwrites potentially evidence-bearing free space." 'WARN'
     if (-not $AllowSystemDrive -and -not (Confirm-Continue 'Continue writing to the system drive?')) {
-        Write-Log 'Aborting. Use -OutputPath <external/network path> or -AllowSystemDrive.' 'ERROR'; exit 2
+        Write-Log 'Aborting. Use -OutputPath <external/network path> or -AllowSystemDrive.' 'ERROR'; Restore-QuickEdit; exit 2
     }
 }
 
@@ -985,7 +991,7 @@ $outInfo = $AllVolumes | Where-Object { $_.Letter -eq $outRoot.TrimEnd('\').ToUp
 if ($outInfo -and $outInfo.Internal -and $outInfo.Letter -ne ($env:SystemDrive).ToUpper()) {
     Write-Log "Output is on INTERNAL disk $($outInfo.Letter) ($($outInfo.Model), $($outInfo.Bus)); it is excluded from collection and its free space is overwritten." 'WARN'
     if (-not $AllowSystemDrive -and -not (Confirm-Continue 'Continue writing to this internal disk?')) {
-        Write-Log 'Aborting. Use -OutputPath on an external/network drive, or -AllowSystemDrive.' 'ERROR'; exit 2
+        Write-Log 'Aborting. Use -OutputPath on an external/network drive, or -AllowSystemDrive.' 'ERROR'; Restore-QuickEdit; exit 2
     }
 }
 
@@ -1000,7 +1006,7 @@ if ($null -eq $freeGB) {
 elseif ($freeGB -lt $requiredGB) {
     Write-Log "Only $freeGB GB free; recommended $requiredGB GB for '$CollectionProfile'." 'WARN'
     if ($script:SpaceConfirmed) { Write-Log 'Continuing: confirmed in guided setup.' 'WARN' }
-    elseif (-not (Confirm-Continue 'Continue anyway?')) { Write-Log 'Aborting: insufficient space.' 'ERROR'; exit 3 }
+    elseif (-not (Confirm-Continue 'Continue anyway?')) { Write-Log 'Aborting: insufficient space.' 'ERROR'; Restore-QuickEdit; exit 3 }
 }
 
 # ===================================================================
@@ -1104,7 +1110,6 @@ function Get-OutputDropNote {
 
 Write-Log "Collect_v3 $ScriptVersion | Case=$CaseId | Operator=$Operator | Host=$HostName | Profile=$CollectionProfile"
 Write-Log "Output: $CollectionRoot"
-if (Disable-QuickEdit) { Write-Log 'Console QuickEdit turned off for this run (a click in the window can no longer pause collection); restored at the end' }
 foreach ($v in $AllVolumes) {
     $role = if ($v.Letter -eq ($env:SystemDrive).ToUpper()) { 'system drive' }
             elseif (@($ExtraVolumes | Where-Object { $_.Letter -eq $v.Letter }).Count) { 'EXTRA - will be collected' }
@@ -1229,6 +1234,7 @@ $Tool = [ordered]@{
 if ($CollectionProfile -eq 'MemoryOnly' -and -not ($Tool.Winpmem -or $Tool.Magnet -or $Tool.DumpIt)) {
     Write-Log 'Memory Only needs WinPmem, Magnet RAM Capture or DumpIt in the toolkit, and none was found. Nothing was collected; add a memory tool under Tools\ or choose another profile.' 'ERROR'
     Add-LogLine $null
+    Restore-QuickEdit
     exit 1
 }
 
