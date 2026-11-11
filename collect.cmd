@@ -1,6 +1,6 @@
 @echo off
 rem ==========================================================================
-rem  collect.cmd - launcher for Collect_v3 (Windows DFIR triage collector)
+rem  collect.cmd - launcher for Recollect (Windows DFIR triage collector)
 rem
 rem    collect                 Guided setup: answer a few questions, then collect.
 rem    collect -CaseId ...     Manual mode: the parameters go straight to
@@ -17,7 +17,7 @@ rem
 rem  BSD 3-Clause License. Copyright (c) 2026, seliyyah-dfir. See LICENSE.
 rem ==========================================================================
 setlocal EnableExtensions DisableDelayedExpansion
-title Collect_v3
+title Recollect
 
 rem 64-bit PowerShell even when this runs in a 32-bit cmd.exe.
 set "PSEXE=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
@@ -60,14 +60,14 @@ exit /b %errorlevel%
 :not_admin
 if not "%~1"=="" (
     echo.
-    echo   Collect_v3 needs administrator rights.
+    echo   Recollect needs administrator rights.
     echo   Manual mode: open a terminal with "Run as administrator" and run collect again.
     echo   Guided setup: run collect with no parameters and Windows will ask for permission.
     echo.
     exit /b 1
 )
 echo.
-echo   Collect_v3 needs administrator rights. Windows will ask for permission;
+echo   Recollect needs administrator rights. Windows will ask for permission;
 echo   the collection then opens in a new window.
 set "COLLECT_SELF=%~f0"
 "%PSEXE%" -NoProfile -ExecutionPolicy Bypass -Command "try { Start-Process -FilePath $env:COLLECT_SELF -ArgumentList '/elevated' -Verb RunAs -ErrorAction Stop } catch { exit 1 }"
@@ -89,7 +89,7 @@ exit /b %RC%
 
 :usage
 echo.
-echo   Collect_v3 - Windows DFIR triage collector
+echo   Recollect - Windows DFIR triage collector
 echo.
 echo   GUIDED SETUP (recommended)
 echo     collect

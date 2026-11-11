@@ -64,7 +64,7 @@
 .PARAMETER KapeVss            Make KAPE also collect from every existing Volume Shadow Copy (slow; can multiply size).
 .PARAMETER KapeSkipBrowserData  Full only. Leave KAPE's WebBrowsers target out of !SANS_Triage: no browser saved-password,
                               cookie or autofill databases and no DPAPI keys from it. Browser history is still collected by
-                              Collect_v3 and Velociraptor. Other KAPE targets can still copy DPAPI keys (Dropbox metadata)
+                              Recollect and Velociraptor. Other KAPE targets can still copy DPAPI keys (Dropbox metadata)
                               and saved connection credentials (mRemoteNG); see the user guide, section 7.14.
 .PARAMETER KapeVolumeTargets  KAPE targets for each extra internal volume (Full). Default 'FileSystem,RecycleBin'.
 .PARAMETER VelociraptorArtifact / VelociraptorArgs   Artifact and parameters for the Full profile.
@@ -82,7 +82,7 @@
                               NOTE: 7-Zip receives the password on its command line (visible to local admins).
 .PARAMETER NoAnalysisReadme   Don't write ANALYSIS_README.txt files. By default each output folder (and each artifact
                               folder under Disk\) gets a short text file: what the files are, why they matter, how to
-                              analyze them and links to the tools' official pages. Collect_v3 runs none of those tools.
+                              analyze them and links to the tools' official pages. Recollect runs none of those tools.
 
 .NOTES
     Version : 3.9.0
@@ -282,12 +282,36 @@ function Write-UiWrapped {
 }
 
 function Show-Banner {
-    $line = { param($Left, $Right) '  ' + $Left + (' ' * [math]::Max(2, $UiWidth - 2 - $Left.Length - $Right.Length)) + $Right }
+    $art = @(
+        '    ____    ______  ______  ____    __      __      ______  ______  ______'
+        '   / __ \  / ____/ / ____/ / __ \  / /     / /     / ____/ / ____/ /_  __/'
+        '  / /_/ / / __/   / /     / / / / / /     / /     / __/   / /       / /'
+        ' / _, _/ / /___  / /___  / /_/ / / /___  / /___  / /___  / /___    / /'
+        '/_/ |_| /_____/  \____/  \____/ /_____/ /_____/ /_____/  \____/   /_/'
+    )
+    $box = @(
+        "Recollect  |  Incident Response Collector  |  v$ScriptVersion"
+        'Created by Tony Rosario'
+        'Preserve the evidence before it changes.'
+        'github.com/seliyyah/windows-dfir-collector'
+    )
+    $artWidth = ($art | Measure-Object -Property Length -Maximum).Maximum
+    $inner    = ($box | Measure-Object -Property Length -Maximum).Maximum + 2
+    $pad      = ' ' * (2 + [math]::Max(0, [int][math]::Floor(($artWidth - $inner - 2) / 2)))
     Write-Host ''
-    Write-UiRule '='
-    Write-Host (& $line "COLLECT_V3  $ScriptVersion" 'Windows DFIR triage collector') -ForegroundColor White
-    Write-Host (& $line 'BSD 3-Clause License' 'github.com/seliyyah/windows-dfir-collector') -ForegroundColor DarkGray
-    Write-UiRule '='
+    foreach ($l in $art) { Write-Host ('  ' + $l) -ForegroundColor Cyan }
+    Write-Host ''
+    Write-Host ($pad + '+' + ('-' * $inner) + '+') -ForegroundColor DarkGray
+    for ($i = 0; $i -lt $box.Count; $i++) {
+        $text  = $box[$i]
+        $left  = [int][math]::Floor(($inner - $text.Length) / 2)
+        $color = if ($i -eq 0) { 'White' } else { 'Gray' }
+        Write-Host ($pad + '|') -ForegroundColor DarkGray -NoNewline
+        Write-Host ((' ' * $left) + $text + (' ' * ($inner - $left - $text.Length))) -ForegroundColor $color -NoNewline
+        Write-Host '|' -ForegroundColor DarkGray
+    }
+    Write-Host ($pad + '+' + ('-' * $inner) + '+') -ForegroundColor DarkGray
+    Write-Host ($pad + ' BSD 3-Clause License') -ForegroundColor DarkGray
 }
 
 # Profiles as shown to the operator. Times are typical for a laptop writing to a USB 3 drive (lab laptop runs: Quick
@@ -689,7 +713,7 @@ function Compress-RepeatedLines {
                     if ($idx -eq $unit.Count) { $reps++; $idx = 0 }
                     continue
                 }
-                $writer.WriteLine(('[Collect_v3: the {0} line(s) above repeated {1} more times; collapsed after the tool was stopped]' -f $unit.Count, $reps))
+                $writer.WriteLine(('[Recollect: the {0} line(s) above repeated {1} more times; collapsed after the tool was stopped]' -f $unit.Count, $reps))
                 $removed += $reps * $unit.Count
                 for ($k = 0; $k -lt $idx; $k++) { $pending.Add($unit[$k]) }  # a partial copy is real output
                 $unit = $null; $idx = 0; $reps = 0
@@ -793,7 +817,7 @@ function Invoke-External {
 # Collection.log once the collection folder exists. The text is embedded so it travels with the script even when
 # the script is copied without its LICENSE file.
 $LicenseText = @'
-Collect_v3 - Windows DFIR collection script
+Recollect - Windows DFIR collection script
 BSD 3-Clause License
 
 Copyright (c) 2026, seliyyah-dfir
@@ -854,7 +878,7 @@ else {
 Write-Log ('License terms (BSD 3-Clause and authorized-use notice) accepted by {0} via {1}' -f $Operator, $script:LicenseAccepted.Method)
 
 if (-not (Test-IsAdmin)) {
-    Write-Log 'Collect_v3 needs administrator rights. Start it with collect.cmd (it asks Windows for permission), or from a terminal opened with "Run as administrator".' 'ERROR'; exit 1
+    Write-Log 'Recollect needs administrator rights. Start it with collect.cmd (it asks Windows for permission), or from a terminal opened with "Run as administrator".' 'ERROR'; exit 1
 }
 if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) {
     Write-Log "32-bit PowerShell on a 64-bit OS (WOW64 redirection). Use: $env:windir\sysnative\WindowsPowerShell\v1.0\powershell.exe" 'ERROR'
@@ -1060,7 +1084,7 @@ foreach ($f in 'Memory', 'System', 'Network', 'Processes', 'Persistence', 'Secur
 }
 
 # The header goes first, ahead of lines logged before the folder existed (such as the license acceptance).
-$script:LogPending.Insert(0, ('Collect_v3 log | started {0} | {1} | user {2}\{3} | PowerShell {4} | PID {5}' -f (Get-UtcStamp),
+$script:LogPending.Insert(0, ('Recollect log | started {0} | {1} | user {2}\{3} | PowerShell {4} | PID {5}' -f (Get-UtcStamp),
     $HostName, $env:USERDOMAIN, $env:USERNAME, $PSVersionTable.PSVersion, $PID))
 $script:LogPath = Join-Path $CollectionRoot 'Collection.log'
 Add-LogLine $null
@@ -1127,7 +1151,7 @@ function Get-OutputDropNote {
     return $null
 }
 
-Write-Log "Collect_v3 $ScriptVersion | Case=$CaseId | Operator=$Operator | Host=$HostName | Profile=$CollectionProfile"
+Write-Log "Recollect $ScriptVersion | Case=$CaseId | Operator=$Operator | Host=$HostName | Profile=$CollectionProfile"
 Write-Log "Output: $CollectionRoot"
 foreach ($v in $AllVolumes) {
     $role = if ($v.Letter -eq ($env:SystemDrive).ToUpper()) { 'system drive' }
@@ -1157,7 +1181,7 @@ if ($YaraRules) {
 }
 if ($Ctx.Level -ge 4) {
     if ($KapeSkipBrowserData) {
-        Write-Log '-KapeSkipBrowserData: KAPE will run without its WebBrowsers target (no browser saved passwords, cookies, autofill or DPAPI keys from it). Browser history is still collected by Collect_v3 and Velociraptor.'
+        Write-Log '-KapeSkipBrowserData: KAPE will run without its WebBrowsers target (no browser saved passwords, cookies, autofill or DPAPI keys from it). Browser history is still collected by Recollect and Velociraptor.'
     }
     else {
         Write-Log 'KAPE browser data included: KAPE copies browser saved-password, cookie and autofill databases and the DPAPI keys that decrypt them. Treat the collection as holding working credentials (user guide 7.14); -KapeSkipBrowserData leaves them out.'
@@ -1540,7 +1564,7 @@ function ConvertFrom-CommandHistoryFile {
 function Get-CommandEventRows {
     param([Parameter(Mandatory)][string]$Path, [int]$Id, [string]$Source, [string]$LogLabel, [int]$Cap = 200000,
         [string]$OwnScript, [int]$OwnPid = -1, [datetime]$SinceUtc = [datetime]::MaxValue)
-    # Rows caused by this collection (Collect_v3's own script blocks, which PowerShell logs as "suspicious", and its own
+    # Rows caused by this collection (Recollect's own script blocks, which PowerShell logs as "suspicious", and its own
     # start) are kept but marked, so they're easy to filter out without hiding anything.
     $max = 32000
     $sidNames = @{}
@@ -1595,7 +1619,7 @@ function Get-CommandEventRows {
                 if ($tUtc -ge $SinceUtc -and (($Id -eq 4104 -and $e.ProcessId -eq $OwnPid) -or
                         ($OwnScript -and (((& $v 'Path') -eq $OwnScript) -or
                             ($Id -eq 400 -and $cmd.IndexOf($OwnScript, [StringComparison]::OrdinalIgnoreCase) -ge 0))))) {
-                    $detail = ('{0}; from this collection run (Collect_v3 itself)' -f $detail).TrimStart('; ')
+                    $detail = ('{0}; from this collection run (Recollect itself)' -f $detail).TrimStart('; ')
                 }
                 if ($cmd.Length -gt $max) { $cmd = $cmd.Substring(0, $max) + ' [truncated]' }
                 [pscustomobject][ordered]@{
@@ -1697,7 +1721,7 @@ function ConvertTo-SysmonRow {
 }
 function Get-SysmonEventRows {
     param([Parameter(Mandatory)][string]$Path, [string]$LogLabel, [int]$Cap = 300000, [int]$OwnPid = -1, [datetime]$SinceUtc = [datetime]::MaxValue)
-    # Rows caused by this collection (Collect_v3 and every process it started, followed through Sysmon's own
+    # Rows caused by this collection (Recollect and every process it started, followed through Sysmon's own
     # process-creation events) are kept but marked, so they're easy to filter out.
     $own = New-Object 'System.Collections.Generic.HashSet[int]'; [void]$own.Add($OwnPid)
     $q = New-Object System.Diagnostics.Eventing.Reader.EventLogQuery($Path, [System.Diagnostics.Eventing.Reader.PathType]::FilePath)
@@ -1715,7 +1739,7 @@ function Get-SysmonEventRows {
                     $parent = 0; if ($data.ContainsKey('ParentProcessId')) { [void][int]::TryParse([string]$data['ParentProcessId'], [ref]$parent) }
                     $mine = $own.Contains($pidNow)
                     if ($e.Id -eq 1 -and $own.Contains($parent)) { [void]$own.Add($pidNow); $mine = $true }
-                    if ($mine) { $row.Detail = ('{0}; from this collection run (Collect_v3 or a tool it started)' -f $row.Detail).TrimStart('; ') }
+                    if ($mine) { $row.Detail = ('{0}; from this collection run (Recollect or a tool it started)' -f $row.Detail).TrimStart('; ') }
                 }
                 $row
                 $n++
@@ -3914,7 +3938,7 @@ catch {
 
 $counts = $script:Results | Group-Object Status | ForEach-Object { '{0}={1}' -f $_.Name, $_.Count }
 @(
-    "Collect_v3 $ScriptVersion  (script SHA256 $scriptSha)"
+    "Recollect $ScriptVersion  (script SHA256 $scriptSha)"
     "Case: $CaseId   Operator: $Operator"
     "License: BSD-3-Clause; terms accepted $($script:LicenseAccepted.Utc) via $($script:LicenseAccepted.Method)"
     "Host: $HostName   Profile: $CollectionProfile"
@@ -3965,7 +3989,7 @@ $ReadmeTools = [ordered]@{
     'MemProcFS'                  = 'https://github.com/ufrisk/MemProcFS'
     'bulk_extractor'             = 'https://github.com/simsong/bulk_extractor'
     'bulk-extractor-to-csv'      = 'https://github.com/seliyyah/bulk-extractor-to-csv'
-    'Hibr2Bin'                   = 'Comae Toolkit; included in the Collect_v3 toolkit'
+    'Hibr2Bin'                   = 'Comae Toolkit; included in the Recollect toolkit'
     'Sysinternals'               = 'https://learn.microsoft.com/sysinternals/'
     'YARA'                       = 'https://virustotal.github.io/yara/'
     'Hayabusa'                   = 'https://github.com/Yamato-Security/hayabusa'
@@ -4233,7 +4257,7 @@ HOW TO ANALYZE
   query (22) for where processes connected; Process accessed (10) with Target lsass.exe for
   credential theft; Registry value set (13) on Run keys; File creation time changed (2) for
   timestomping; File stream created (15) for hidden streams; Process tampering (25). Rows
-  marked "from this collection run" in Detail come from Collect_v3 and the tools it started.
+  marked "from this collection run" in Detail come from Recollect and the tools it started.
 '@ }
 
 @{ Paths = @('Disk'); Guide = '7.8'
@@ -5099,7 +5123,7 @@ WHAT IS HERE
   only, with hashes), handle.txt, listdlls.txt and logonsessions.txt. Also RawCopy logs and
   *.err files (usually just the tool's banner, which is normal). When a tool had to be
   stopped (its step shows FAIL in CollectorResults.csv), its partial output is kept and
-  repeated lines are collapsed to one copy and a "[Collect_v3: ... repeated N more times"
+  repeated lines are collapsed to one copy and a "[Recollect: ... repeated N more times"
   note.
 
 WHY IT MATTERS
@@ -5138,7 +5162,7 @@ WHAT IS HERE
   Targets_<X>\       Extra internal drives.
   Modules\<Category>\  !EZParser CSV output, sorted by category.
   kape_console.log   The full KAPE log.
-  CAUTION: unlike Collect_v3's own collectors, KAPE's browser targets copy saved-password
+  CAUTION: unlike Recollect's own collectors, KAPE's browser targets copy saved-password
   stores (Chrome and Edge "Login Data", Firefox logins.json), cookies, autofill ("Web Data")
   and each user's DPAPI master keys (AppData\Roaming\Microsoft\Protect), plus SAM and
   SECURITY. Handle this folder as sensitive.
@@ -5200,7 +5224,7 @@ function Format-AnalysisReadme {
     $line = '=' * 78
     [void]$sb.AppendLine(('ANALYSIS_README.txt  -  {0}' -f $RelativePath))
     [void]$sb.AppendLine($line)
-    [void]$sb.AppendLine(('Written by Collect_v3 {0}. Collect_v3 does not run or include the tools named' -f $ScriptVersion))
+    [void]$sb.AppendLine(('Written by Recollect {0}. Recollect does not run or include the tools named' -f $ScriptVersion))
     [void]$sb.AppendLine('here: use them afterwards on your analysis workstation, on a copy of this folder,')
     [void]$sb.AppendLine('never on the machine that was collected.')
     [void]$sb.AppendLine('')
@@ -5214,7 +5238,7 @@ function Format-AnalysisReadme {
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine('MORE DETAIL')
     $word = if ($Entry.Guide -match ' and ') { 'sections' } else { 'section' }
-    [void]$sb.AppendLine(('  Collect_v3 user guide, {0} {1}:' -f $word, $Entry.Guide))
+    [void]$sb.AppendLine(('  Recollect user guide, {0} {1}:' -f $word, $Entry.Guide))
     [void]$sb.AppendLine(('  {0}' -f $ReadmeGuideUrl))
     $sb.ToString()
 }

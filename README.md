@@ -1,4 +1,6 @@
-# Collect_v3: Windows DFIR Live-Response Collector
+# Recollect: Windows DFIR Live-Response Collector
+
+*Formerly Collect_v3. The launcher (`collect.cmd`), the script file (`Collect_v3.ps1`) and this repository's address are unchanged, so existing launch commands keep working.*
 
 A single PowerShell script that collects forensic evidence from a live Windows machine, in order of volatility. It drives the standard free DFIR toolset (Sysinternals, Eric Zimmerman's tools, KAPE, Velociraptor, WinPmem / Magnet RAM Capture / DumpIt, RawCopy) and writes a hashed, self-documenting collection: a manifest, per-step results, and SHA-256 hashes of every file.
 
@@ -57,7 +59,7 @@ Opt-in extras: `-YaraRules <file.yar>` (process-memory YARA scan, Full), `-LolDr
 - **Resilient:** each step is isolated and recorded as OK / WARN / FAIL / SKIPPED, so a missing tool or failed step never stops the run.
 - **Drive-letter independent:** finds its tools relative to its own location, collects whatever drive Windows is on, and auto-detects extra **internal** disks (USB and virtual disks are excluded).
 - **Tamper and BYOVD awareness:** records whether logging was interfered with (disabled or shrunk event-log channels, stopped ETW/AutoLogger sessions, WFP filters blocking security tools) and hashes every driver, including ones loaded with no service entry, ready for LOLDrivers matching.
-- **Careful with credentials:** Collect_v3's own collectors record configs that can hold secrets (rclone, ngrok, WinSCP, FileZilla, RMM agents, AnyDesk) as presence and hash only, and never copy SSH private keys or browser cookies, saved passwords and autofill. See the caution below.
+- **Careful with credentials:** Recollect's own collectors record configs that can hold secrets (rclone, ngrok, WinSCP, FileZilla, RMM agents, AnyDesk) as presence and hash only, and never copy SSH private keys or browser cookies, saved passwords and autofill. See the caution below.
 - **Command lines in one place:** `System\command_history.csv` lists every command from every PowerShell history file (for every account, including SYSTEM and the service accounts, which attackers using PsExec or services leave behind), plus bash, Python and Windows Terminal; at Deep, `EventLogs\command_events.csv` adds the command lines from the event logs (script blocks, PowerShell starts, process creation, WMI consumers) in time order, with the collector's own activity marked. [Section 7.15](docs/USER_GUIDE.md#715-command-line-activity-where-commands-are-recorded) maps where else commands are recorded, including CMD, which keeps no history file.
 - **Hidden data streams:** `Disk\ads_unusual.csv` lists NTFS alternate data streams (`file.txt:payload.exe`) on files and folders where attackers hide tools. Routine streams such as Mark-of-the-Web are only counted. Each stream gets its size, SHA-256, first bytes and a content hint ("PE executable", "script"...), and streams up to 1 MB are copied for analysis.
 - **Sysmon in one table:** when Sysmon is installed, `EventLogs\sysmon_events.csv` (Deep) turns every Sysmon event (process creation, network, DNS, registry, file, process access, drivers, WMI, tampering) into one readable, time-ordered table, with the collector's own activity marked.
@@ -98,7 +100,7 @@ The collection is designed to be opened with **Timeline Explorer** and the other
 
 ## Purpose and responsible use
 
-Collect_v3 is built **for defenders**: incident responders, forensic examiners, SOC analysts, students and researchers who need a fast, repeatable and well-documented way to preserve evidence from a Windows machine before it changes or disappears.
+Recollect is built **for defenders**: incident responders, forensic examiners, SOC analysts, students and researchers who need a fast, repeatable and well-documented way to preserve evidence from a Windows machine before it changes or disappears.
 
 **Nothing in it is new offensive capability.** Every technique it uses (memory acquisition, shadow copies, copying locked files such as the registry hives, `$MFT` and event logs) is long-established, publicly documented forensic practice. It is taught in DFIR courses and performed by the freely available tools credited below. The script's contribution is **orchestration and rigor**: running those tools in order of volatility, keeping its footprint on the evidence small, and recording a manifest, hashes and per-step results so the collection holds up to review.
 
@@ -117,7 +119,7 @@ Collecting credential-bearing artifacts such as the SAM and SECURITY hives is a 
 
 This project stands on the shoulders of the people who build and maintain the free DFIR tools it orchestrates. **None of these tools are included in this repository.** Download each from its official source and follow its license. If they help you, star their repositories, cite them in your reports and support their work.
 
-| Tool | Created and maintained by | What Collect_v3 uses it for | Official source |
+| Tool | Created and maintained by | What Recollect uses it for | Official source |
 |---|---|---|---|
 | **EZ Tools** (EvtxECmd, RECmd, MFTECmd, PECmd, AmcacheParser, AppCompatCacheParser, LECmd, JLECmd, SBECmd, RBCmd, SrumECmd, WxTCmd, SQLECmd, Timeline Explorer) | **Eric Zimmerman** | Parsing every collected artifact into analysis-ready CSV, and viewing it | https://ericzimmerman.github.io |
 | **KAPE** (Kroll Artifact Parser and Extractor) | **Eric Zimmerman / Kroll**, with community-maintained Targets and Modules ([KapeFiles](https://github.com/EricZimmerman/KapeFiles)) | Full-profile triage collection and `!EZParser` processing | https://www.kroll.com/kape |
@@ -135,7 +137,7 @@ All product names and trademarks belong to their respective owners. Their mentio
 
 ## License
 
-Collect_v3 is released under the **[BSD 3-Clause License](LICENSE)**. Copyright (c) 2026, seliyyah-dfir.
+Recollect is released under the **[BSD 3-Clause License](LICENSE)**. Copyright (c) 2026, seliyyah-dfir.
 
 The license covers only this repository's own files (the script and its documentation). The third-party tools credited above are not part of it: each keeps its own license, and some (Sysinternals, KAPE) don't allow redistribution at all.
 
@@ -143,7 +145,7 @@ The license covers only this repository's own files (the script and its document
 
 ### Sharing and redistributing
 
-You may use, copy, modify and share Collect_v3, including commercially and inside your organization, under these conditions:
+You may use, copy, modify and share Recollect, including commercially and inside your organization, under these conditions:
 
 - **Sharing a link** to this repository needs nothing more: the license travels with it.
 - **Copying it** (a fork, a toolkit drive handed to a colleague, a zip on a file share, a script inside your own toolkit): keep the [LICENSE](LICENSE) file with it, and keep the copyright and license lines in the script's header. If you change the script, keep those notices; please also say that your copy is modified, so problems aren't reported against the original.

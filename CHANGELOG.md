@@ -19,6 +19,7 @@ All notable changes to `Collect_v3.ps1`. Format based on [Keep a Changelog](http
   - **The disclaimer is honest about what remains:** KAPE's Dropbox metadata target still copies the DPAPI key folder, and its mRemoteNG target saved connection credentials.
 
 ### Changed
+- **New name: Recollect.** A new startup banner with large slanted RECOLLECT letters and a framed panel (name, version, credit, tagline, repository). The console screens, `Collection.log`, `manifest.txt`, the folder READMEs and the docs now say Recollect. **Unchanged:** the launcher `collect.cmd`, the script file `Collect_v3.ps1`, the repository address and every parameter, so existing launch commands and scripts keep working. Log and manifest lines that said "Collect_v3" now say "Recollect" (for example the `Recollect log | started ...` header and "from this collection run (Recollect itself)"): update any filters that matched the old text.
 - `ANALYSIS_README.txt` for `Disk\` and `EventLogs\` describe the new files and how to read them.
 - Standard runs take about 2 minutes longer (the stream scan); Deep runs about 2 ms per Sysmon event longer.
 
