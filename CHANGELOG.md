@@ -2,6 +2,50 @@
 
 All notable changes to `Collect_v3.ps1`. Format based on [Keep a Changelog](https://keepachangelog.com/); versions follow [Semantic Versioning](https://semver.org/).
 
+## [3.9.0]
+
+### Added
+- **Unusual alternate data streams, `Disk\ads_unusual.csv` (Standard and up).** Lists hidden NTFS streams (`file.txt:payload.exe`) on files **and folders** where attackers hide tools and staged data:
+  - **Where it looks:** recursively under Users, ProgramData, Program Files (both), `Windows\Temp`, the task folders, `$Recycle.Bin` and PerfLogs; at the top level only for the drive root, `Windows` and `System32`. It reads from the shadow copy, with a live fallback.
+  - **What it skips:** routine streams are counted in a summary row, not listed. Those are Zone.Identifier (already in `zone_identifier.csv`), SmartScreen, Office and thumbnail properties, OLE property sets, macOS and Dropbox metadata, and Malwarebytes' marks.
+  - **What it records:** for every other stream, its size, SHA-256 (up to 512 MB), first 16 bytes and a content hint (PE executable, ZIP, OLE, script or text...).
+  - **Copies:** streams up to 1 MB are copied to `Disk\ADS\` as `.bin` files.
+  - **How:** the same native `FindFirstStreamW` walker as Mark-of-the-Web, junctions skipped, capped at 1.5 million entries per area.
+- **Sysmon events in one table, `EventLogs\sysmon_events.csv` (Deep and up).** Every event from the collected Sysmon log becomes one readable row, in log order, using the event's own `UtcTime`. Each row has the event name, account, process, a `Target` column for what the event is about, and a `Detail` column with the fields that matter for that event type. All 29 event types are mapped, and unknown ones list their fields. Collect_v3 and every process it started are followed through Sysmon's own process-creation events and marked "from this collection run". It stops at 300,000 events with a WARN, and the file is empty when Sysmon isn't installed. No tool needed.
+- **KAPE browser data: disclaimer and opt-out.** Full runs still include KAPE's browser targets by default.
+  - **Guided setup** explains what they copy for Full: saved passwords, cookies, autofill and the DPAPI keys that decrypt them. It asks "Include KAPE's browser data? (Y/n)", and the summary and manual command reflect the answer.
+  - **`-KapeSkipBrowserData`** (new) runs `!SANS_Triage` without its `WebBrowsers` target. KAPE has no exclude option, so the compound is expanded into its other targets, read from the KAPE install's own `.tkape` file; entries are deduplicated and unknown compounds are flagged.
+  - **Every Full run logs** whether browser data is included.
+  - **The disclaimer is honest about what remains:** KAPE's Dropbox metadata target still copies the DPAPI key folder, and its mRemoteNG target saved connection credentials.
+
+### Changed
+- `ANALYSIS_README.txt` for `Disk\` and `EventLogs\` describe the new files and how to read them.
+- Standard runs take about 2 minutes longer (the stream scan); Deep runs about 2 ms per Sysmon event longer.
+
+### Documentation
+- README: features for hidden streams and Sysmon; the credentials caution mentions `-KapeSkipBrowserData`.
+- User guide:
+  - Section 1.2 (guided options): the KAPE browser data question.
+  - Section 4: Standard and Deep rows.
+  - Section 5: the `-KapeSkipBrowserData` row.
+  - Section 7 quick reference, 7.7 (`sysmon_events.csv`) and 7.8 (`ads_unusual.csv`, `Disk\ADS\`).
+  - 7.13 and 7.14: the opt-out and what it does and doesn't remove.
+
+### Verified
+- **Stream scan:**
+  - A test folder: an executable hidden in a text file's stream (flagged as a PE), a PowerShell command in a folder's stream, a 3 MB stream (hashed, not copied), an empty stream, and routine Zone.Identifier and OLE property streams (counted, not listed). Copies and hashes matched.
+  - The live system drive, not elevated: 445,000 files and folders in about 2¼ minutes; only Malwarebytes' marks turned up, and they are now on the routine list.
+- **KAPE:**
+  - The expansion against the lab KAPE's `!SANS_Triage`: 17 targets, `WebBrowsers` removed. An explicit `WebBrowsers` entry is removed, duplicates collapsed, and an unknown compound flagged.
+  - Guided setup asks for Full, and the answer reaches the summary and the manual command.
+- **Sysmon:**
+  - The row conversion for events built from Sysmon's published schema (1, 2, 3, 10, 13, 15, 22, 25 and an unknown ID).
+  - The reader loop and its cap against a real collected event log.
+- **Not yet verified:**
+  - `sysmon_events.csv` against a real Sysmon log, including the own-run marking (Sysmon isn't installed on the lab laptop).
+  - The stream scan from a real shadow copy in an elevated run.
+  - A Full run with `-KapeSkipBrowserData`.
+
 ## [3.8.0]
 
 ### Added

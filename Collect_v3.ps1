@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Collect_v3.ps1 - Endpoint DFIR live-response / triage collection framework.
 
@@ -17,8 +17,10 @@
                       kernel modules, WFP filters, Sysmon config, SSH keys, PowerShell transcripts, Mark-of-the-Web,
                       command-line histories (PowerShell for every account incl. SYSTEM, bash, Python, Windows Terminal)
                       in System\command_history.csv; Deep adds EventLogs\command_events.csv.
+                      Unusual alternate data streams (hidden NTFS streams) in Disk\ads_unusual.csv.
       Deep     (3)  + SRUM, WMI repo, LNK/JumpLists, browser history, $MFT/$J/$LogFile (raw),
-                      Sigcheck on user-writable paths, and Zimmerman parsers over the collected copies.
+                      Sigcheck on user-writable paths, and Zimmerman parsers over the collected copies;
+                      every Sysmon event in EventLogs\sysmon_events.csv (when Sysmon is installed).
       Full     (4)  + KAPE (targets + !EZParser modules) and Velociraptor collections, pagefile/hiberfil/
                       swapfile, full Recycle Bin, Windows Search DB, Sigcheck over System32.
 
@@ -60,6 +62,10 @@
 .PARAMETER KapeTargets        KAPE target(s) for the Full profile. Default !SANS_Triage.
 .PARAMETER KapeModules        KAPE module(s) to run after targets. Default !EZParser. Pass '' to skip modules.
 .PARAMETER KapeVss            Make KAPE also collect from every existing Volume Shadow Copy (slow; can multiply size).
+.PARAMETER KapeSkipBrowserData  Full only. Leave KAPE's WebBrowsers target out of !SANS_Triage: no browser saved-password,
+                              cookie or autofill databases and no DPAPI keys from it. Browser history is still collected by
+                              Collect_v3 and Velociraptor. Other KAPE targets can still copy DPAPI keys (Dropbox metadata)
+                              and saved connection credentials (mRemoteNG); see the user guide, section 7.14.
 .PARAMETER KapeVolumeTargets  KAPE targets for each extra internal volume (Full). Default 'FileSystem,RecycleBin'.
 .PARAMETER VelociraptorArtifact / VelociraptorArgs   Artifact and parameters for the Full profile.
                               VelociraptorArgs ('Name=Value') are passed to EVERY artifact.
@@ -79,7 +85,7 @@
                               analyze them and links to the tools' official pages. Collect_v3 runs none of those tools.
 
 .NOTES
-    Version : 3.8.0
+    Version : 3.9.0
     License : BSD 3-Clause (SPDX-License-Identifier: BSD-3-Clause). Copyright (c) 2026, seliyyah-dfir.
               See LICENSE. Provided "as is", without warranty of any kind.
     Tested  : syntax-targeted at Windows PowerShell 5.1 (the common endpoint default).
@@ -109,6 +115,7 @@ param(
     [string]$KapeTargets = '!SANS_Triage',
     [string]$KapeModules = '!EZParser',
     [switch]$KapeVss,
+    [switch]$KapeSkipBrowserData,                 # leave KAPE's WebBrowsers target (saved passwords, cookies) out
     [string]$KapeVolumeTargets = 'FileSystem,RecycleBin',
     # Windows.KapeFiles.Targets is no longer built in (0.77.3); KAPE already does the file triage.
     # These built-in artifacts parse live state instead. Each runs separately into its own zip.
@@ -138,7 +145,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Continue'
 $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
 
-$ScriptVersion  = '3.8.0'
+$ScriptVersion  = '3.9.0'
 $ScriptStartUtc = [DateTime]::UtcNow
 # Guided setup when started with no parameters at all (for example by collect.cmd); manual mode otherwise.
 $GuidedMode     = ($PSBoundParameters.Count -eq 0)
@@ -419,6 +426,7 @@ function Invoke-GuidedSetup {
     $memTool  = @($files | Where-Object { $_.Name -like 'winpmem*.exe' -or $_.Name -like 'go-winpmem*.exe' -or
         $_.Name -like 'MagnetRAMCapture*.exe' -or $_.Name -like 'MRCv*.exe' -or $_.Name -eq 'DumpIt.exe' }).Count -gt 0
     $sevenZip = @($files | Where-Object { $_.Name -in '7z.exe', '7za.exe' }).Count -gt 0
+    $kape     = @($files | Where-Object { $_.Name -eq 'kape.exe' }).Count -gt 0
     # YARA rules for the process scan come only from Tools\YARA\, so rules shipped inside other tools (LOLDrivers'
     # driver-file rules, for example) are never offered by accident.
     $yaraDir   = Join-Path $ToolsRoot 'YARA'
@@ -433,6 +441,7 @@ function Invoke-GuidedSetup {
 
     $g = [ordered]@{ CaseId = ''; Operator = $DefaultOperator; CollectionProfile = ''; Memory = $false; OutputPath = $DefaultOutput
         AllowSystemDrive = $false; SpaceConfirmed = $false; DefenderQuarantine = $false; YaraRules = $null; LolDriversCsv = $null
+        KapeSkipBrowserData = $false
         Archive = $false; ArchivePassword = $null; RamBytes = $ram; Command = '' }
 
     Write-Host ''
@@ -527,6 +536,13 @@ function Invoke-GuidedSetup {
         if (Read-UiYesNo 'Match drivers against LOLDrivers?' $true) { $g.LolDriversCsv = $lolFiles[0].FullName }
         Write-Host ''
     }
+    if ($level -ge 4 -and $kape) {
+        Write-Host '  KAPE browser data' -ForegroundColor White
+        Write-UiWrapped 'KAPE''s triage copies each browser''s saved-password, cookie and autofill databases (Chrome, Edge, Firefox, Brave and others) and the DPAPI keys that can decrypt them. They can prove account takeover or session theft, but the collection then holds working credentials: store it encrypted and limit who can open it.' -Indent 4 -Color DarkGray
+        Write-UiWrapped 'Leaving it out skips only KAPE''s WebBrowsers target. Browser history is still collected. KAPE''s Dropbox and mRemoteNG targets can still copy DPAPI keys and saved connection credentials.' -Indent 4 -Color DarkGray
+        $g.KapeSkipBrowserData = -not (Read-UiYesNo 'Include KAPE''s browser data?' $true)
+        Write-Host ''
+    }
     if ($level -ge 4 -and $yaraFiles.Count) {
         Write-Host '  YARA process scan' -ForegroundColor White
         Write-UiWrapped 'Scans the memory of running processes with YARA rules found in the toolkit. Slow, and security software may raise an alert.' -Indent 4 -Color DarkGray
@@ -582,6 +598,7 @@ function Invoke-GuidedSetup {
     if ($g.DefenderQuarantine) { $cmd += '-DefenderQuarantine' }
     if ($g.LolDriversCsv) { $cmd += @('-LolDriversCsv', (Format-UiArg $g.LolDriversCsv)) }
     if ($g.YaraRules) { $cmd += @('-YaraRules', (Format-UiArg $g.YaraRules)) }
+    if ($g.KapeSkipBrowserData) { $cmd += '-KapeSkipBrowserData' }
     if ($g.Archive) { $cmd += '-Archive' }
     $g.Command = $cmd -join ' '
 
@@ -594,6 +611,7 @@ function Invoke-GuidedSetup {
     if ($g.DefenderQuarantine) { $opts += 'Defender quarantine' }
     if ($g.LolDriversCsv) { $opts += 'LOLDrivers matching' }
     if ($g.YaraRules) { $opts += 'YARA scan' }
+    if ($level -ge 4 -and $kape) { $opts += $(if ($g.KapeSkipBrowserData) { 'KAPE browser data left out' } else { 'KAPE browser data included' }) }
     if ($g.Archive) { $opts += $(if ($g.ArchivePassword) { 'archive (password protected)' } elseif ($sevenZip) { 'archive (no password)' } else { 'archive (.zip, no encryption)' }) }
     Write-Host ''
     Write-Host '  READY TO COLLECT' -ForegroundColor Cyan
@@ -888,12 +906,13 @@ if ($GuidedMode) {
     $CaseId = $g.CaseId; $Operator = $g.Operator; $CollectionProfile = $g.CollectionProfile; $OutputPath = $g.OutputPath
     $Memory = [switch]$g.Memory; $AllowSystemDrive = [switch]$g.AllowSystemDrive; $DefenderQuarantine = [switch]$g.DefenderQuarantine
     $Archive = [switch]$g.Archive; $ArchivePassword = $g.ArchivePassword; $YaraRules = $g.YaraRules; $LolDriversCsv = $g.LolDriversCsv
+    $KapeSkipBrowserData = [switch]$g.KapeSkipBrowserData
     $script:SpaceConfirmed = $g.SpaceConfirmed
     # Recorded in the manifest's Parameters exactly as if they had been typed (the password never is).
     foreach ($k in 'CaseId', 'Operator', 'CollectionProfile', 'OutputPath', 'YaraRules', 'LolDriversCsv') {
         if ($g[$k]) { $PSBoundParameters[$k] = $g[$k] }
     }
-    foreach ($k in 'Memory', 'AllowSystemDrive', 'DefenderQuarantine', 'Archive') { if ($g[$k]) { $PSBoundParameters[$k] = [switch]$true } }
+    foreach ($k in 'Memory', 'AllowSystemDrive', 'DefenderQuarantine', 'Archive', 'KapeSkipBrowserData') { if ($g[$k]) { $PSBoundParameters[$k] = [switch]$true } }
     Write-Log 'Launch mode: guided setup'
     Write-Log "Manual-mode equivalent: $($g.Command)"
     Write-Host ''
@@ -1134,6 +1153,14 @@ if ($YaraRules) {
     }
     elseif ($Ctx.Level -lt 4) {
         Write-Log "-YaraRules runs through Velociraptor, which only runs in the Full profile. It will be skipped for '$CollectionProfile'." 'WARN'
+    }
+}
+if ($Ctx.Level -ge 4) {
+    if ($KapeSkipBrowserData) {
+        Write-Log '-KapeSkipBrowserData: KAPE will run without its WebBrowsers target (no browser saved passwords, cookies, autofill or DPAPI keys from it). Browser history is still collected by Collect_v3 and Velociraptor.'
+    }
+    else {
+        Write-Log 'KAPE browser data included: KAPE copies browser saved-password, cookie and autofill databases and the DPAPI keys that decrypt them. Treat the collection as holding working credentials (user guide 7.14); -KapeSkipBrowserData leaves them out.'
     }
 }
 if ($LolDriversCsv -and -not (Test-Path -LiteralPath $LolDriversCsv -PathType Leaf)) {
@@ -1583,6 +1610,121 @@ function Get-CommandEventRows {
     }
     finally { $reader.Dispose() }
     if ($n -ge $Cap) { Write-Error "$LogLabel event ${Id}: stopped at $Cap rows; the rest are only in the .evtx file" }
+}
+
+# Sysmon events (3.9.0): one readable row per event from the COPIED Sysmon log, in log order. Field names follow the
+# Sysmon schema (Sysinternals docs, schema 4.x). ConvertTo-SysmonRow handles one event so it can be tested without
+# Sysmon installed.
+$SysmonEventNames = @{
+    1 = 'Process created'; 2 = 'File creation time changed'; 3 = 'Network connection'; 4 = 'Sysmon service state changed'
+    5 = 'Process terminated'; 6 = 'Driver loaded'; 7 = 'Image (DLL) loaded'; 8 = 'Remote thread created'; 9 = 'Raw disk read'
+    10 = 'Process accessed'; 11 = 'File created'; 12 = 'Registry key or value created/deleted'; 13 = 'Registry value set'
+    14 = 'Registry key or value renamed'; 15 = 'File stream created (ADS)'; 16 = 'Sysmon configuration changed'
+    17 = 'Pipe created'; 18 = 'Pipe connected'; 19 = 'WMI event filter'; 20 = 'WMI event consumer'
+    21 = 'WMI consumer bound to filter'; 22 = 'DNS query'; 23 = 'File deleted (archived)'; 24 = 'Clipboard changed'
+    25 = 'Process tampering'; 26 = 'File deleted (logged)'; 27 = 'Executable file blocked'; 28 = 'File shredding blocked'
+    29 = 'Executable file detected'; 255 = 'Sysmon error'
+}
+function ConvertTo-SysmonRow {
+    param([int]$Id, [hashtable]$Data, [datetime]$TimeCreatedUtc, [long]$RecordId, [string]$LogLabel)
+    $v = { param($k) if ($Data.ContainsKey($k)) { [string]$Data[$k] } else { '' } }
+    # Detail text from label/value pairs; pairs with an empty value are left out. An empty label shows the value alone.
+    $kv = { param([object[]]$P)
+        $parts = for ($i = 0; $i + 1 -lt $P.Count; $i += 2) {
+            if ("$($P[$i + 1])") { if ($P[$i]) { '{0} {1}' -f $P[$i], $P[$i + 1] } else { "$($P[$i + 1])" } }
+        }
+        @($parts) -join '; ' }
+    $image = & $v 'Image'; $procId = & $v 'ProcessId'; $target = ''; $detail = ''
+    switch ($Id) {
+        1  { $target = & $v 'CommandLine'
+             $parentText = if (& $v 'ParentImage') { ('{0} (PID {1}) {2}' -f (& $v 'ParentImage'), (& $v 'ParentProcessId'), (& $v 'ParentCommandLine')).Trim() } else { '' }
+             $detail = & $kv @('parent', $parentText, 'integrity', (& $v 'IntegrityLevel'), 'folder', (& $v 'CurrentDirectory'),
+                'original name', (& $v 'OriginalFileName')) }
+        2  { $target = & $v 'TargetFilename'
+             $detail = & $kv @('creation time set to', (& $v 'CreationUtcTime'), 'was', (& $v 'PreviousCreationUtcTime')) }
+        3  { $dst = '{0}:{1}' -f (& $v 'DestinationIp'), (& $v 'DestinationPort')
+             if (& $v 'DestinationHostname') { $dst += ' (' + (& $v 'DestinationHostname') + ')' }
+             $target = '{0} {1}:{2} -> {3}' -f (& $v 'Protocol'), (& $v 'SourceIp'), (& $v 'SourcePort'), $dst
+             $detail = & $kv @('outbound', (& $v 'Initiated'), 'port name', (& $v 'DestinationPortName')) }
+        4  { $target = & $v 'State'; $detail = & $kv @('version', (& $v 'Version'), 'schema', (& $v 'SchemaVersion')) }
+        { $_ -in 6, 7 } {
+             $target = & $v 'ImageLoaded'
+             $detail = & $kv @('signed', (& $v 'Signed'), 'signature', (& $v 'Signature'), 'status', (& $v 'SignatureStatus'),
+                'original name', (& $v 'OriginalFileName')) }
+        { $_ -in 8, 10 } {
+             $image = & $v 'SourceImage'; $procId = & $v 'SourceProcessId'
+             $target = '{0} (PID {1})' -f (& $v 'TargetImage'), (& $v 'TargetProcessId')
+             if ($Id -eq 8) { $detail = & $kv @('start', (& $v 'StartAddress'), 'module', (& $v 'StartModule'), 'function', (& $v 'StartFunction')) }
+             else {
+                 $trace = & $v 'CallTrace'; if ($trace.Length -gt 400) { $trace = $trace.Substring(0, 400) + ' [truncated]' }
+                 $detail = & $kv @('access', (& $v 'GrantedAccess'), 'call trace', $trace)
+             } }
+        9  { $target = & $v 'Device' }
+        11 { $target = & $v 'TargetFilename'; $detail = & $kv @('file created', (& $v 'CreationUtcTime')) }
+        { $_ -in 12, 13, 14 } {
+             $target = & $v 'TargetObject'
+             $detail = & $kv @('', (& $v 'EventType'), 'value', (& $v 'Details'), 'new name', (& $v 'NewName')) }
+        15 { $target = & $v 'TargetFilename'; $detail = & $kv @('contents', (& $v 'Contents')) }
+        16 { $target = & $v 'Configuration'; $detail = & $kv @('config hash', (& $v 'ConfigurationFileHash')) }
+        { $_ -in 17, 18 } { $target = & $v 'PipeName' }
+        19 { $target = & $v 'Query'; $detail = & $kv @('', (& $v 'Operation'), 'name', (& $v 'Name'), 'namespace', (& $v 'EventNamespace')) }
+        20 { $target = & $v 'Destination'; $detail = & $kv @('', (& $v 'Operation'), 'name', (& $v 'Name'), 'type', (& $v 'Type')) }
+        21 { $target = 'consumer {0} -> filter {1}' -f (& $v 'Consumer'), (& $v 'Filter'); $detail = & $v 'Operation' }
+        22 { $target = & $v 'QueryName'; $detail = & $kv @('status', (& $v 'QueryStatus'), 'results', (& $v 'QueryResults')) }
+        { $_ -in 23, 26, 27, 28, 29 } {
+             $target = & $v 'TargetFilename'; $detail = & $kv @('archived', (& $v 'Archived'), 'executable', (& $v 'IsExecutable')) }
+        24 { $target = '(clipboard)'; $detail = & $kv @('session', (& $v 'Session'), 'client', (& $v 'ClientInfo')) }
+        25 { $target = & $v 'Type' }
+        default {
+             $detail = (@($Data.Keys | Sort-Object | Where-Object { $_ -notin 'UtcTime', 'ProcessGuid', 'RuleName', 'User', 'Image', 'ProcessId', 'Hashes' } |
+                ForEach-Object { '{0}={1}' -f $_, $Data[$_] }) -join '; ') }
+    }
+    # UtcTime (inside the event) is when Sysmon saw it; TimeCreated (the log record) is a fallback.
+    $time = $TimeCreatedUtc.ToString('yyyy-MM-ddTHH:mm:ss.fffZ', $Inv)
+    $ut = & $v 'UtcTime'
+    if ($ut) {
+        $p = [datetime]::MinValue
+        if ([datetime]::TryParseExact($ut, 'yyyy-MM-dd HH:mm:ss.fff', $Inv, [Globalization.DateTimeStyles]::AssumeUniversal -bor [Globalization.DateTimeStyles]::AdjustToUniversal, [ref]$p)) {
+            $time = $p.ToString('yyyy-MM-ddTHH:mm:ss.fffZ', $Inv)
+        }
+    }
+    $name = if ($SysmonEventNames.ContainsKey($Id)) { $SysmonEventNames[$Id] } else { "Event $Id" }
+    if ($target.Length -gt 32000) { $target = $target.Substring(0, 32000) + ' [truncated]' }
+    [pscustomobject][ordered]@{
+        TimeUtc = $time; EventId = $Id; Event = $name; Account = & $v 'User'; ProcessId = $procId; Image = $image
+        Target = $target; Detail = $detail; Hashes = & $v 'Hashes'; RuleName = & $v 'RuleName'; RecordId = $RecordId; LogFile = $LogLabel
+    }
+}
+function Get-SysmonEventRows {
+    param([Parameter(Mandatory)][string]$Path, [string]$LogLabel, [int]$Cap = 300000, [int]$OwnPid = -1, [datetime]$SinceUtc = [datetime]::MaxValue)
+    # Rows caused by this collection (Collect_v3 and every process it started, followed through Sysmon's own
+    # process-creation events) are kept but marked, so they're easy to filter out.
+    $own = New-Object 'System.Collections.Generic.HashSet[int]'; [void]$own.Add($OwnPid)
+    $q = New-Object System.Diagnostics.Eventing.Reader.EventLogQuery($Path, [System.Diagnostics.Eventing.Reader.PathType]::FilePath)
+    $reader = New-Object System.Diagnostics.Eventing.Reader.EventLogReader($q)
+    $n = 0
+    try {
+        while ($n -lt $Cap -and ($e = $reader.ReadEvent())) {
+            try {
+                $x = [xml]$e.ToXml()
+                $data = @{}
+                foreach ($d in $x.SelectNodes("//*[local-name()='EventData']/*[local-name()='Data']")) { $nm = $d.GetAttribute('Name'); if ($nm) { $data[$nm] = $d.InnerText } }
+                $row = ConvertTo-SysmonRow -Id $e.Id -Data $data -TimeCreatedUtc $e.TimeCreated.ToUniversalTime() -RecordId $e.RecordId -LogLabel $LogLabel
+                if ($e.TimeCreated.ToUniversalTime() -ge $SinceUtc) {
+                    $pidNow = 0; [void][int]::TryParse([string]$row.ProcessId, [ref]$pidNow)
+                    $parent = 0; if ($data.ContainsKey('ParentProcessId')) { [void][int]::TryParse([string]$data['ParentProcessId'], [ref]$parent) }
+                    $mine = $own.Contains($pidNow)
+                    if ($e.Id -eq 1 -and $own.Contains($parent)) { [void]$own.Add($pidNow); $mine = $true }
+                    if ($mine) { $row.Detail = ('{0}; from this collection run (Collect_v3 or a tool it started)' -f $row.Detail).TrimStart('; ') }
+                }
+                $row
+                $n++
+            }
+            finally { $e.Dispose() }
+        }
+    }
+    finally { $reader.Dispose() }
+    if ($n -ge $Cap) { Write-Error "${LogLabel}: stopped at $Cap events; the rest are only in the .evtx file (and in evtx_all.csv)" }
 }
 
 # Map a path under Get-ReadRoot back to the original C:\ path, so outputs show where the file really lives.
@@ -2819,6 +2961,176 @@ function Get-ZoneIdRow {
 Add-Collector -Phase 5 -Level 2 -Name 'Zone.Identifier (Mark-of-the-Web) in user folders' -Format Csv -Out 'Disk\zone_identifier.csv' -NeedsVss -Action { Get-ZoneIdRow -Root $Ctx.ShadowLink }
 Add-Collector -Phase 5 -Level 2 -Name 'Fallback: Zone.Identifier from live files' -Format Csv -Out 'Disk\zone_identifier.csv' -OnlyWithoutVss -Action { Get-ZoneIdRow -Root "$env:SystemDrive\" }
 
+# Unusual alternate data streams (3.9.0). An NTFS file or folder can carry hidden named data streams
+# (file.txt:payload.exe) that Explorer and dir don't show; attackers hide tools, scripts and staged data there.
+# Streams Windows and common software write routinely (Zone.Identifier, which zone_identifier.csv covers, SmartScreen,
+# Office and thumbnail properties, macOS and Dropbox metadata) are counted but not listed. Every other stream is listed
+# with its size, SHA-256 and first bytes, and copied (up to 1 MB) to Disk\ADS\ as a .bin file. Same native walker as
+# Mark-of-the-Web: FindFirstStreamW per file and folder, junctions skipped, reading from the snapshot when there is one.
+$AdsBenignNames = 'Zone.Identifier', 'SmartScreen', 'OECustomProperty', 'encryptable', 'favicon', 'AFP_AfpInfo', 'AFP_Resource',
+    'com.dropbox.attributes', 'com.dropbox.attrs', 'ms-properties', 'Win32App_1', 'MBAM.Zone.Identifier'
+function Find-AdsStream {
+    param([string]$Dir, [bool]$Recurse, [int]$Cap, [string]$CopyDir, [long]$CopyMax = 1MB, [long]$HashMax = 512MB)
+    if (-not ('DfirNative.AdsScan' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System; using System.Collections.Generic; using System.IO; using System.Runtime.InteropServices; using System.Security.Cryptography; using System.Text;
+namespace DfirNative {
+public class AdsHit { public string Path; public bool IsDirectory; public string Stream; public long Size; public DateTime LastWriteUtc; public string Sha256; public string Head; public string CopiedTo; public string Note; }
+public class AdsScanResult { public List<AdsHit> Hits = new List<AdsHit>(); public int Scanned; public bool Capped; public Dictionary<string, int> Benign = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase); }
+public static class AdsScan {
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct WIN32_FIND_STREAM_DATA { public long StreamSize; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 296)] public string cStreamName; }
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern IntPtr FindFirstStreamW(string lpFileName, int InfoLevel, out WIN32_FIND_STREAM_DATA lpFindStreamData, uint dwFlags);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool FindNextStreamW(IntPtr hFindStream, out WIN32_FIND_STREAM_DATA lpFindStreamData);
+    [DllImport("kernel32.dll")] static extern bool FindClose(IntPtr hFindFile);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFileW(string name, uint access, uint share, IntPtr sec, uint disp, uint flags, IntPtr tmpl);
+
+    static string Long(string p) { return p.StartsWith(@"\\") ? p : @"\\?\" + p; }
+    static string Safe(string s, int max) {
+        var sb = new StringBuilder();
+        foreach (char c in s) sb.Append(c < 32 || "<>:\"/\\|?*".IndexOf(c) >= 0 ? '_' : c);
+        string r = sb.ToString(); return r.Length > max ? r.Substring(0, max) : r;
+    }
+    // Named $DATA streams of a file or folder: ":name:$DATA" -> name. The unnamed main stream ("::$DATA") is skipped.
+    static List<KeyValuePair<string, long>> Streams(string path) {
+        var list = new List<KeyValuePair<string, long>>();
+        WIN32_FIND_STREAM_DATA d;
+        IntPtr h = FindFirstStreamW(Long(path), 0, out d, 0);
+        if (h == new IntPtr(-1)) return list;
+        try {
+            do {
+                string n = d.cStreamName;
+                if (n == null || n.StartsWith("::")) continue;
+                int end = n.LastIndexOf(':');
+                string name = end > 0 ? n.Substring(1, end - 1) : n.TrimStart(':');
+                list.Add(new KeyValuePair<string, long>(name, d.StreamSize));
+            } while (FindNextStreamW(h, out d));
+        }
+        finally { FindClose(h); }
+        return list;
+    }
+    // Read a stream once, read-only and shared: SHA-256 (up to hashMax bytes), first 16 bytes, and a copy if small.
+    static void Inspect(AdsHit hit, string copyDir, long copyMax, long hashMax, ref int copied) {
+        uint flags = hit.IsDirectory ? 0x02000000u : 0u;   // FILE_FLAG_BACKUP_SEMANTICS for a folder's stream
+        using (var h = CreateFileW(Long(hit.Path) + ":" + hit.Stream, 0x80000000, 7, IntPtr.Zero, 3, flags, IntPtr.Zero)) {
+            if (h.IsInvalid) { hit.Note = "could not open the stream (error " + Marshal.GetLastWin32Error() + ")"; return; }
+            using (var fs = new FileStream(h, FileAccess.Read))
+            using (var sha = SHA256.Create()) {
+                var buf = new byte[1 << 20]; long total = 0; int n; byte[] head = null;
+                MemoryStream keep = (copyDir != null && hit.Size <= copyMax) ? new MemoryStream() : null;
+                while (total < hashMax && (n = fs.Read(buf, 0, (int)Math.Min(buf.Length, hashMax - total))) > 0) {
+                    if (head == null) { head = new byte[Math.Min(16, n)]; Array.Copy(buf, head, head.Length); }
+                    sha.TransformBlock(buf, 0, n, null, 0); total += n;
+                    if (keep != null) keep.Write(buf, 0, n);
+                }
+                sha.TransformFinalBlock(new byte[0], 0, 0);
+                if (total >= hashMax && hit.Size > hashMax) hit.Note = "not hashed (larger than " + (hashMax >> 20) + " MB)";
+                else hit.Sha256 = BitConverter.ToString(sha.Hash).Replace("-", "");
+                hit.Head = head == null ? "" : BitConverter.ToString(head).Replace("-", " ");
+                if (keep != null) {
+                    copied++;
+                    string name = string.Format("{0:D5}_{1}@{2}.bin", copied, Safe(Path.GetFileName(hit.Path.TrimEnd('\\')), 80), Safe(hit.Stream, 80));
+                    Directory.CreateDirectory(copyDir);
+                    File.WriteAllBytes(Path.Combine(copyDir, name), keep.ToArray());
+                    hit.CopiedTo = name;
+                }
+                else if (copyDir != null && hit.Note == null) hit.Note = "not copied (larger than " + (copyMax >> 10) + " KB)";
+            }
+        }
+    }
+    static void Check(string path, bool isDir, AdsScanResult r, HashSet<string> benign, string copyDir, long copyMax, long hashMax, ref int copied) {
+        foreach (var s in Streams(path)) {
+            if (benign.Contains(s.Key) || (s.Key.Length > 0 && s.Key[0] == '\u0005')) {   // \u0005: OLE property sets
+                int c; r.Benign.TryGetValue(s.Key.TrimStart('\u0005'), out c); r.Benign[s.Key.TrimStart('\u0005')] = c + 1; continue;
+            }
+            var hit = new AdsHit { Path = path, IsDirectory = isDir, Stream = s.Key, Size = s.Value };
+            try { hit.LastWriteUtc = isDir ? Directory.GetLastWriteTimeUtc(path) : File.GetLastWriteTimeUtc(path); } catch { }
+            try { Inspect(hit, copyDir, copyMax, hashMax, ref copied); } catch (Exception e) { hit.Note = "read failed: " + e.Message; }
+            r.Hits.Add(hit);
+        }
+    }
+    public static AdsScanResult Scan(string root, bool recurse, int cap, string[] benignNames, string copyDir, long copyMax, long hashMax, int copiedSoFar) {
+        var r = new AdsScanResult(); var benign = new HashSet<string>(benignNames, StringComparer.OrdinalIgnoreCase);
+        int copied = copiedSoFar;
+        var stack = new Stack<string>(); stack.Push(root);
+        while (stack.Count > 0) {
+            string dir = stack.Pop();
+            if (++r.Scanned > cap) { r.Capped = true; break; }
+            Check(dir, true, r, benign, copyDir, copyMax, hashMax, ref copied);
+            try {
+                foreach (var f in Directory.EnumerateFiles(dir)) {
+                    if (++r.Scanned > cap) { r.Capped = true; return r; }
+                    Check(f, false, r, benign, copyDir, copyMax, hashMax, ref copied);
+                }
+            } catch { }
+            if (!recurse) continue;
+            try { foreach (var s in Directory.EnumerateDirectories(dir)) { try { if ((File.GetAttributes(s) & FileAttributes.ReparsePoint) == 0) stack.Push(s); } catch { } } } catch { }
+        }
+        return r;
+    }
+} }
+'@
+    }
+    [DfirNative.AdsScan]::Scan($Dir, $Recurse, $Cap, [string[]]$AdsBenignNames, $CopyDir, $CopyMax, $HashMax, $script:AdsCopied)
+}
+
+# What the first bytes of a stream suggest, for quick triage. A hint only: check the copy or the hash.
+function Get-AdsContentHint {
+    param([string]$Head)
+    if (-not $Head) { return 'empty' }
+    $b = @($Head -split ' ' | ForEach-Object { [Convert]::ToByte($_, 16) })
+    if ($b.Count -ge 2 -and $b[0] -eq 0x4D -and $b[1] -eq 0x5A) { return 'PE executable or DLL (MZ header)' }
+    if ($b.Count -ge 4 -and $b[0] -eq 0x50 -and $b[1] -eq 0x4B -and $b[2] -eq 3 -and $b[3] -eq 4) { return 'ZIP container (zip, Office, jar...)' }
+    if ($b.Count -ge 4 -and $b[0] -eq 0xD0 -and $b[1] -eq 0xCF -and $b[2] -eq 0x11 -and $b[3] -eq 0xE0) { return 'OLE compound file (old Office, msi)' }
+    if ($b.Count -ge 4 -and $b[0] -eq 0x7F -and $b[1] -eq 0x45 -and $b[2] -eq 0x4C -and $b[3] -eq 0x46) { return 'ELF executable' }
+    if ($b.Count -ge 2 -and $b[0] -eq 0x1F -and $b[1] -eq 0x8B) { return 'gzip' }
+    if ($b.Count -ge 4 -and $b[0] -eq 0x25 -and $b[1] -eq 0x50 -and $b[2] -eq 0x44 -and $b[3] -eq 0x46) { return 'PDF' }
+    if ($b.Count -ge 2 -and (($b[0] -eq 0xFF -and $b[1] -eq 0xFE) -or ($b[0] -eq 0xFE -and $b[1] -eq 0xFF))) { return 'UTF-16 text' }
+    if (@($b | Where-Object { ($_ -lt 9) -or ($_ -gt 13 -and $_ -lt 32) -or $_ -gt 126 }).Count -eq 0) { return 'text' }
+    'binary'
+}
+
+function Get-AdsRow {
+    param([string]$Root, [int]$Cap = 1500000)
+    $script:AdsCopied = 0
+    $copyDir = Join-Path $Ctx.Disk 'ADS'
+    # Where user and attacker files live, recursively; plus the top level of the drive and of Windows and System32.
+    $targets = @(
+        @{ Rel = 'Users'; Recurse = $true }, @{ Rel = 'ProgramData'; Recurse = $true }, @{ Rel = 'Program Files'; Recurse = $true }
+        @{ Rel = 'Program Files (x86)'; Recurse = $true }, @{ Rel = 'Windows\Temp'; Recurse = $true }, @{ Rel = 'Windows\Tasks'; Recurse = $true }
+        @{ Rel = 'Windows\System32\Tasks'; Recurse = $true }, @{ Rel = '$Recycle.Bin'; Recurse = $true }, @{ Rel = 'PerfLogs'; Recurse = $true }
+        @{ Rel = ''; Recurse = $false }, @{ Rel = 'Windows'; Recurse = $false }, @{ Rel = 'Windows\System32'; Recurse = $false }
+    )
+    $scanned = 0; $benign = @{}; $capped = New-Object System.Collections.Generic.List[string]
+    foreach ($t in $targets) {
+        $dir = if ($t.Rel) { Join-Path $Root $t.Rel } else { $Root.TrimEnd('\') + '\' }
+        if (-not (Test-Path -LiteralPath $dir -ErrorAction Ignore)) { continue }
+        $r = Find-AdsStream -Dir $dir -Recurse $t.Recurse -Cap $Cap -CopyDir $copyDir
+        $scanned += [math]::Min($r.Scanned, $Cap)
+        foreach ($k in $r.Benign.Keys) { $benign[$k] = [int]$benign[$k] + $r.Benign[$k] }
+        if ($r.Capped) { $capped.Add((ConvertTo-OriginalPath $dir)) }
+        foreach ($h in $r.Hits) {
+            if ($h.CopiedTo) { $script:AdsCopied++ }
+            [pscustomobject][ordered]@{
+                Path = ConvertTo-OriginalPath $h.Path; IsFolder = $h.IsDirectory; Stream = $h.Stream; Size = $h.Size
+                LastWriteTimeUtc = $(if ($h.LastWriteUtc -gt [datetime]::MinValue) { $h.LastWriteUtc.ToString('o') } else { $null })
+                SHA256 = $h.Sha256; FirstBytes = $h.Head; ContentHint = Get-AdsContentHint $h.Head
+                CopiedTo = $(if ($h.CopiedTo) { "Disk\ADS\$($h.CopiedTo)" } else { $null }); Note = $h.Note
+            }
+        }
+    }
+    $benignText = if ($benign.Count) { ($benign.Keys | Sort-Object | ForEach-Object { '{0}={1}' -f $_, $benign[$_] }) -join ', ' } else { 'none' }
+    $note = 'Scanned {0:N0} files and folders. Routine streams counted, not listed: {1}.' -f $scanned, $benignText
+    if ($capped.Count) { $note += ' CAPPED after {0:N0} entries in: {1}.' -f $Cap, ($capped -join '; ') }
+    [pscustomobject][ordered]@{ Path = '(summary)'; IsFolder = $null; Stream = '(summary)'; Size = $null; LastWriteTimeUtc = $null
+        SHA256 = $null; FirstBytes = $null; ContentHint = $null; CopiedTo = $null; Note = $note }
+}
+Add-Collector -Phase 5 -Level 2 -Name 'Unusual alternate data streams (hidden NTFS streams)' -Format Csv -Out 'Disk\ads_unusual.csv' -NeedsVss -Action { Get-AdsRow -Root $Ctx.ShadowLink }
+Add-Collector -Phase 5 -Level 2 -Name 'Fallback: unusual alternate data streams from live files' -Format Csv -Out 'Disk\ads_unusual.csv' -OnlyWithoutVss -Action { Get-AdsRow -Root "$env:SystemDrive\" }
+
 # Remote-access / RMM tools beyond AnyDesk, TeamViewer, RustDesk and Splashtop.
 # Paths for ScreenConnect, Atera and LogMeIn come from KAPE 1.3.0.2 Targets\Apps (ScreenConnect.tkape v1.0,
 # AteraAgent.tkape v1.0, LogMeIn.tkape v1.0). KAPE has no targets for MeshAgent, NetSupport, SimpleHelp or Action1,
@@ -3152,6 +3464,20 @@ Add-Collector -Phase 7 -Level 3 -Name 'Command events: command lines from the ev
     @($rows) | Sort-Object TimeUtc
 }
 
+# Every Sysmon event in one readable CSV (3.9.0): process creation, network connections, file and registry changes,
+# DNS queries, process access, driver and DLL loads, WMI, ADS creation, tampering. No tool needed. Empty when Sysmon
+# isn't installed (the log then doesn't exist); EvtxECmd's evtx_all.csv holds the same events in its generic layout.
+Add-Collector -Phase 7 -Level 3 -Name 'Sysmon events: every Sysmon event in one readable CSV' -Format Csv -Out 'EventLogs\sysmon_events.csv' -Action {
+    $path = $null
+    foreach ($sub in 'EventLogs\All', 'EventLogs\Live') {
+        $p = Join-Path (Join-Path $Ctx.Root $sub) 'Microsoft-Windows-Sysmon%4Operational.evtx'
+        if (Test-Path -LiteralPath $p) { $path = $p; break }
+    }
+    if ($path) {
+        Get-SysmonEventRows -Path $path -LogLabel $path.Substring($Ctx.Root.Length).TrimStart('\') -OwnPid $PID -SinceUtc $ScriptStartUtc
+    }
+}
+
 Add-Collector -Phase 7 -Level 3 -Name 'Parse: RECmd (batch file required)' -Format None -Needs 'RECmd' -Action {
     if (-not $Tool.RECmdBatch) { throw 'No RECmd batch (*.reb) file found in toolkit' }
     foreach ($set in @(@{ N = 'System'; P = 'Windows\System32\config' }, @{ N = 'Users'; P = 'Users' })) {
@@ -3301,10 +3627,36 @@ Add-Collector -Phase 7 -Level 3 -Name 'Parse: SrumECmd' -Format None -Needs 'Sru
 }
 
 # ---------- PHASE 8: FULL (KAPE / VELOCIRAPTOR) ----------
+# -KapeSkipBrowserData: KAPE has no "exclude" option, so a compound target such as !SANS_Triage is expanded into its
+# members (read from the .tkape file of the KAPE in use, so it follows kape --sync updates) minus WebBrowsers.
+function Get-KapeTargetList {
+    param([string]$Targets, [string]$KapeDir, [bool]$SkipBrowsers)
+    if (-not $SkipBrowsers) { return @{ Targets = $Targets; Note = '' } }
+    $out = New-Object System.Collections.Generic.List[string]; $notes = New-Object System.Collections.Generic.List[string]
+    foreach ($t in @($Targets -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })) {
+        if ($t -ieq 'WebBrowsers') { $notes.Add('WebBrowsers removed'); continue }
+        if ($t.StartsWith('!')) {
+            $file = Get-ChildItem -LiteralPath (Join-Path $KapeDir 'Targets') -Recurse -File -Filter "$t.tkape" -ErrorAction Ignore | Select-Object -First 1
+            $members = if ($file) { @(Get-Content -LiteralPath $file.FullName | ForEach-Object { if ($_ -match '^\s*Path:\s*([^#\s]+)\.tkape\s*$') { $Matches[1] } }) } else { @() }
+            if ($members -icontains 'WebBrowsers') {
+                foreach ($m in $members) { if ($m -ine 'WebBrowsers') { $out.Add($m) } }
+                $notes.Add("$t expanded without WebBrowsers")
+                continue
+            }
+            if (-not $file) { $notes.Add("$t not found, kept as given: check it doesn't include WebBrowsers") }
+        }
+        $out.Add($t)
+    }
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    @{ Targets = (@($out | Where-Object { $seen.Add($_) }) -join ','); Note = ($notes -join '; ') }
+}
+
 Add-Collector -Phase 8 -Level 4 -Name 'KAPE targets (+ optional modules)' -Format None -Needs 'KAPE' -Action {
     $dest = Join-Path $Ctx.Root 'KAPE'
+    $tl = Get-KapeTargetList -Targets $KapeTargets -KapeDir $Tool.KAPE.DirectoryName -SkipBrowsers $KapeSkipBrowserData.IsPresent
+    if ($tl.Note) { 'Browser data left out (-KapeSkipBrowserData): ' + $tl.Note; 'Targets: ' + $tl.Targets }
     # Flags verified against kape.exe 1.3.0.2 --help. --msource defaults to --tdest when targets run first.
-    $kArgs = @('--tsource', $env:SystemDrive, '--tdest', (Join-Path $dest 'Targets'), '--target', $KapeTargets, '--tflush')
+    $kArgs = @('--tsource', $env:SystemDrive, '--tdest', (Join-Path $dest 'Targets'), '--target', $tl.Targets, '--tflush')
     if ($KapeVss) { $kArgs += '--vss' }
     if ($KapeModules) { $kArgs += @('--module', $KapeModules, '--mdest', (Join-Path $dest 'Modules'), '--mflush') }
     Invoke-External -FilePath $Tool.KAPE.FullName -ArgumentList $kArgs -OutFile (Join-Path $dest 'kape_console.log') -TimeoutSec 14400
@@ -3852,6 +4204,10 @@ WHAT IS HERE
                       PowerShell script blocks (4104), PowerShell start command lines (400),
                       process creation (Security 4688, Sysmon 1), WMI permanent consumers
                       (WMI-Activity 5861).
+  sysmon_events.csv   (Deep and Full) Every Sysmon event in one readable table, when Sysmon
+                      is installed: process creation, network connections, file and registry
+                      changes, DNS queries, process access, driver and DLL loads, WMI, ADS
+                      creation, tampering. Empty when Sysmon isn't installed.
 
 WHY IT MATTERS
   Logons, service installs, process creation, PowerShell script blocks, RDP sessions and log
@@ -3872,6 +4228,12 @@ HOW TO ANALYZE
   group them by the ScriptBlockId in Detail. No 4688 rows, or 4688 rows without command
   lines, means process auditing (or its command-line option) was off. CAUTION: command
   lines can contain passwords.
+  sysmon_events.csv: open it in Timeline Explorer and filter Event (or EventId). Good starting
+  points: Process created (1) for command lines and parents; Network connection (3) and DNS
+  query (22) for where processes connected; Process accessed (10) with Target lsass.exe for
+  credential theft; Registry value set (13) on Run keys; File creation time changed (2) for
+  timestomping; File stream created (15) for hidden streams; Process tampering (25). Rows
+  marked "from this collection run" in Detail come from Collect_v3 and the tools it started.
 '@ }
 
 @{ Paths = @('Disk'); Guide = '7.8'
@@ -3883,6 +4245,9 @@ WHAT IS HERE
 
   _CopyLog.csv                Every file copied, with its original path and times (UTC).
   zone_identifier.csv         Mark-of-the-Web: where downloaded files came from (HostUrl).
+  ads_unusual.csv             Hidden NTFS alternate data streams that aren't routine (see below).
+  ADS\                        Copies of those streams up to 1 MB, as .bin files. CAUTION: they
+                              can be malware; don't open or run them on a normal workstation.
   remote_access_presence.csv  Remote-access tool configs recorded but not copied (Deep+).
   iis_webroot_listing.csv     Web server files with hashes (Deep+, IIS servers only).
   NTFS\, SystemFiles\, Accessibility_Binaries\, Volume_<X>\   Collected by other means.
@@ -3896,6 +4261,12 @@ HOW TO ANALYZE
   Most of these files are already parsed into Parsed\ (and KAPE\Modules\ in Full): start
   there. Come back here to open a raw file in a viewer. Always work on a copy: some viewers
   (registry hives, ESE databases such as SRUM and WebCache) can change a file when they open it.
+  ads_unusual.csv lists every named data stream except routine ones (Zone.Identifier,
+  SmartScreen, Office and thumbnail properties, macOS and Dropbox metadata), which the last
+  row only counts. Check ContentHint first: a PE executable, script or archive hidden in a
+  stream is a strong lead. Match SHA256 against VirusTotal or your threat intel, and open the
+  copy under ADS\ in a hex editor on an analysis machine. MFTECmd's $MFT output (Parsed\) has
+  HasAds and IsAds columns for streams on every drive, including ones not scanned here.
 '@ }
 
 @{ Paths = @('Disk\NTFS'); Guide = '7.8 and 7.10'
