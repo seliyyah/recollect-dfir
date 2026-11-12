@@ -14,6 +14,7 @@ All notable changes to Recollect (`recollect.ps1`, called `Collect_v3.ps1` befor
 - **`-NetworkCapture` (opt-in): packet capture while the collection runs.**
   - **How:** Windows' built-in pktmon (nothing is installed) records traffic from right after the memory capture until the live steps end, at the network adapters only (each packet once), full packets, in a circular file capped by **`-NetworkCaptureMaxMB`** (default 512).
   - **Output:** when it stops, the `.etl` is converted to `Network\capture.pcapng` for Wireshark, and the packet-capture driver is unloaded again.
+  - **Wi-Fi:** a Wi-Fi adapter hands pktmon raw 802.11 frames, but pktmon's converter labels the whole file Ethernet, so Wireshark can't decode them (found in the first live test: 1,648 of 1,654 packets showed as undecoded data). Each Wi-Fi adapter's packets are now also converted on their own to **`Network\capture_wifi.pcapng`**, labeled IEEE 802.11. The adapter's pktmon component is found by MAC address in a `pktmon list` taken at start. If it can't be found, the file is a relabeled copy of the whole capture, with a note. Windows leaves the *Protected* bit set on these already-decrypted frames, so Wireshark needs *Ignore the Protection bit = Yes - without IV*; the guide and the folder README say so.
   - **Safeguards:** it is always stopped, even when the run is aborted. If another pktmon capture is already running, it's left alone and the step fails with a note. It needs Windows 10 version 2004 or later, and isn't available with Memory Only.
   - **Guided setup** offers it for every profile except Memory Only, default No, with a disclaimer: unencrypted traffic is recorded in full and can contain passwords.
   - **Footprint:** the space check adds twice the cap, and the start-of-run log says the capture is on and sensitive.
@@ -33,8 +34,10 @@ All notable changes to Recollect (`recollect.ps1`, called `Collect_v3.ps1` befor
 - **Event types not in the lab's logs, built from Microsoft's schemas:** RDP and network logons with a source IP, a logon without one (skipped), a failed logon, RDP reconnect, share access to `C$`, RDP authentication, a remote session, WinRM, SSH accepted and failed (invalid user), DNS, SMB client failure, and an unknown event (fields listed).
 - **The capture start and stop logic, with a stand-in pktmon:** the exact commands (`status`; `start --capture --comp nics --pkt-size 0 --file-name ... --file-size ... --log-mode circular`; `stop`; `etl2pcap ... --out ...`; `unload`); refusal when another capture is running; stop when nothing was started; and the abort-path stop.
 - **Guided setup:** the question appears for every profile except Memory Only, and reaches the summary and the manual command.
+- **A live elevated Quick run with the capture:** 30 OK, 1 expected skip. pktmon started 0.4 s after the memory step, and the idle status text was confirmed ("Packet Monitor is not running."). It captured 1,654 packets over 1.8 minutes with no events lost, stopped and converted in 3.6 s, unloaded its driver (the PktMon service was stopped afterwards), and both files were hashed.
+- **The Wi-Fi fix, on that capture:** relabeled as 802.11 with the Protection-bit setting, all 1,654 frames decode (IPv4 and IPv6, TCP, TLS, DNS, QUIC, ARP), against 6 before. The export was tested with a stand-in pktmon for both the found-by-MAC and fallback paths.
 - **Not yet verified:**
-  - A real pktmon capture. pktmon needs administrator rights, and the text `pktmon status` prints when idle ("not running") is assumed from Microsoft's documentation.
+  - The real `pktmon list` layout that the component lookup reads; the fallback covers a mismatch.
   - The WinRM, SMB client, 4625, 4778/4779, 5140 and DNS rows against real events.
 
 ## [4.0.0]

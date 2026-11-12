@@ -2229,6 +2229,67 @@ Add-Collector -Phase 1 -Level 0 -Name 'Memory acquisition' -Format None -Needs '
 # the run is aborted (see the finally block under EXECUTE). Needs Windows 10 2004+ (build 19041) for etl2pcap.
 $script:CaptureRunning = $false
 $script:CaptureStartUtc = $null
+
+# A Wi-Fi adapter hands pktmon raw 802.11 frames (seen on the lab laptop: frames starting 88 42), but etl2pcap labels
+# the whole file Ethernet, so Wireshark can't decode them. For each Wi-Fi adapter, its own packets are converted
+# separately (its pktmon component Id is found by MAC address in the "pktmon list" taken at start) and the file's
+# interface link type is set to IEEE 802.11 (105). Windows has already decrypted the frames but leaves their Protected
+# bit set, so Wireshark needs "Ignore the Protection bit: Yes - without IV" (user guide 7.3).
+function Set-PcapngLinkType {
+    param([string]$Path, [uint16]$LinkType)
+    # Interface Description Blocks (type 1) come before the first packet block, so only the start of the file is walked.
+    $fs = [IO.File]::Open($Path, 'Open', 'ReadWrite', 'None')
+    $n = 0
+    try {
+        $hdr = New-Object byte[] 10
+        $pos = 0L
+        while ($pos + 12 -le $fs.Length) {
+            $fs.Position = $pos
+            if ($fs.Read($hdr, 0, 10) -lt 10) { break }
+            $type = [BitConverter]::ToUInt32($hdr, 0); $len = [BitConverter]::ToUInt32($hdr, 4)
+            if ($len -lt 12) { break }
+            if ($type -eq 1) { $fs.Position = $pos + 8; $fs.Write([BitConverter]::GetBytes($LinkType), 0, 2); $n++ }
+            elseif ($type -in 3, 6) { break }                               # first packet block: no more interfaces
+            $pos += $len
+        }
+    }
+    finally { $fs.Dispose() }
+    $n
+}
+function Export-WifiCapture {
+    param([string]$Etl, [string]$FullPcap, [string]$Log)
+    $wifi = @(try { Get-NetAdapter -Physical -ErrorAction Stop | Where-Object { "$($_.PhysicalMediaType)" -match '802\.11' } } catch { })
+    if (-not $wifi.Count) { return }
+    $list = @(Get-Content -LiteralPath (Join-Path (Split-Path -Parent $Etl) 'pktmon_components.txt') -ErrorAction Ignore)
+    $notes = New-Object System.Collections.Generic.List[string]
+    $k = 0
+    foreach ($a in $wifi) {
+        $mac = ("$($a.MacAddress)" -replace '[-:]', '').ToUpper()
+        $ids = @($list | Where-Object { $_ -match '^\s*(\d+)\s' -and $mac -and (($_ -replace '[-:]', '').ToUpper().Contains($mac)) } |
+            ForEach-Object { [int]([regex]::Match($_, '^\s*(\d+)').Groups[1].Value) } | Select-Object -Unique)
+        foreach ($id in $ids) {
+            $k++
+            $name = if ($k -eq 1) { 'capture_wifi.pcapng' } else { "capture_wifi_$k.pcapng" }
+            $outFile = Join-Path (Split-Path -Parent $Etl) $name
+            & $Exe.pktmon etl2pcap $Etl --component-id $id --out $outFile 2>&1 | Out-File -LiteralPath $Log -Append -Encoding utf8
+            if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $outFile) -and (Set-PcapngLinkType $outFile 105)) {
+                $notes.Add(('Wi-Fi adapter "{0}" (pktmon component {1}): Network\{2} ({3:N1} MB), labeled IEEE 802.11' -f $a.InterfaceDescription, $id, $name, ((Get-Item -LiteralPath $outFile).Length / 1MB)))
+            }
+            else { Write-Error ('Wi-Fi conversion for component {0} failed (see Network\pktmon.log)' -f $id) }
+        }
+    }
+    if (-not $k) {
+        # Component Ids not found: label a copy of the whole capture as 802.11. Packets from wired adapters in this copy
+        # won't decode; they decode in capture.pcapng.
+        $outFile = Join-Path (Split-Path -Parent $Etl) 'capture_wifi.pcapng'
+        Copy-Item -LiteralPath $FullPcap -Destination $outFile -Force
+        [void](Set-PcapngLinkType $outFile 105)
+        $notes.Add('Wi-Fi adapter found but its pktmon component was not identified: Network\capture_wifi.pcapng is the whole capture labeled IEEE 802.11 (wired-adapter packets in it will not decode; use capture.pcapng for those)')
+    }
+    $notes.Add('open the Wi-Fi capture with Wireshark preference IEEE 802.11 > "Ignore the Protection bit" = "Yes - without IV"')
+    $notes
+}
+
 function Stop-NetworkCapture {
     if (-not $script:CaptureRunning) { return }
     $log = Join-Path $Ctx.Root 'Network\pktmon.log'
@@ -2247,6 +2308,7 @@ function Stop-NetworkCapture {
         else { Write-Error 'conversion to pcapng failed; the .etl capture is kept (see Network\pktmon.log)' }
     }
     else { Write-Error 'no capture file was written (see Network\pktmon.log)' }
+    if ((Test-Path -LiteralPath $etl) -and (Test-Path -LiteralPath $pcap)) { foreach ($l in @(Export-WifiCapture -Etl $etl -FullPcap $pcap -Log $log)) { $out.Add($l) } }
     # Unload the packet-capture driver again: the start step confirmed no other pktmon session was running.
     & $Exe.pktmon unload 2>&1 | Out-File -LiteralPath $log -Append -Encoding utf8
     $out
@@ -2262,6 +2324,8 @@ Add-Collector -Phase 1 -Level 1 -Name 'Network capture: start (pktmon, opt-in)' 
     & $Exe.pktmon start --capture --comp nics --pkt-size 0 --file-name $etl --file-size $NetworkCaptureMaxMB --log-mode circular 2>&1 |
         Out-File -LiteralPath $log -Append -Encoding utf8
     if ($LASTEXITCODE -ne 0) { throw "pktmon start returned exit code $LASTEXITCODE (see Network\pktmon.log)" }
+    # Component Ids and adapter MACs, used when stopping to convert each Wi-Fi adapter's packets on their own.
+    & $Exe.pktmon list 2>&1 | Out-File -LiteralPath (Join-Path $Ctx.Root 'Network\pktmon_components.txt') -Encoding utf8
     $script:CaptureRunning = $true
     $script:CaptureStartUtc = [DateTime]::UtcNow
     'capturing to Network\capture.etl (network adapters, full packets, up to {0} MB, oldest overwritten when full)' -f $NetworkCaptureMaxMB
@@ -4537,7 +4601,8 @@ WHAT IS HERE
   net_extra.txt (port proxies, NetBIOS, Wi-Fi profiles), smb.txt (sessions, shares and files
   open by remote clients) and named_pipes.txt.
   capture.pcapng / capture.etl  Only with -NetworkCapture: every packet sent or received
-  while the collection ran (pktmon). pktmon.log is pktmon's own output.
+  while the collection ran (pktmon). capture_wifi.pcapng: the Wi-Fi adapter's packets on
+  their own, labeled 802.11. pktmon.log and pktmon_components.txt are pktmon's own output.
   CAUTION: a capture can contain passwords from unencrypted traffic. Handle it as sensitive.
 
 WHY IT MATTERS
@@ -4551,7 +4616,10 @@ HOW TO ANALYZE
   - netconfig.txt: a modified hosts file or an unexpected proxy is a red flag.
   - net_extra.txt: every port proxy needs an explanation.
   Look up IP addresses and domains on VirusTotal or AbuseIPDB.
-  capture.pcapng: open it in Wireshark (wireshark.org) on an analysis machine. Good first
+  capture.pcapng: open it in Wireshark (wireshark.org) on an analysis machine. On Wi-Fi,
+  open capture_wifi.pcapng instead, after setting Edit > Preferences > Protocols >
+  IEEE 802.11 > "Ignore the Protection bit" to "Yes - without IV" (Windows already
+  decrypted the frames but left that bit set). Good first
   steps: Statistics > Conversations and Endpoints (who talked to whom, how much), the
   dns filter (names looked up), http.request and tls.handshake.extensions_server_name
   (where HTTP and HTTPS went). Match IPs against connections.csv to find the process.
