@@ -20,7 +20,8 @@
                       Unusual alternate data streams (hidden NTFS streams) in Disk\ads_unusual.csv.
       Deep     (3)  + SRUM, WMI repo, LNK/JumpLists, browser history, $MFT/$J/$LogFile (raw),
                       Sigcheck on user-writable paths, and Zimmerman parsers over the collected copies;
-                      every Sysmon event in EventLogs\sysmon_events.csv (when Sysmon is installed).
+                      every Sysmon event in EventLogs\sysmon_events.csv (when Sysmon is installed); network activity
+                      (remote logons, RDP, shares, WinRM, SSH, BITS, firewall, Wi-Fi) in EventLogs\network_events.csv.
       Full     (4)  + KAPE (targets + !EZParser modules) and Velociraptor collections, pagefile/hiberfil/
                       swapfile, full Recycle Bin, Windows Search DB, Sigcheck over System32.
 
@@ -77,6 +78,12 @@
                               MD5/SHA1/SHA256 in it is matched against the driver hashes. No network access is made.
 .PARAMETER DefenderQuarantine Opt-in. Copy the Defender quarantine folder (RC4-obfuscated, but LIVE malware samples)
                               to Security\DefenderQuarantine\. Never enabled by any profile. Use with -Archive -ArchivePassword.
+.PARAMETER NetworkCapture     Opt-in. Record all network traffic with Windows' built-in pktmon from right after the memory
+                              capture until the live steps finish (Network\capture.etl, converted to capture.pcapng for
+                              Wireshark). Needs Windows 10 2004 or later. Unencrypted traffic is captured in full and can
+                              contain passwords. Not available with MemoryOnly.
+.PARAMETER NetworkCaptureMaxMB  Size cap for the capture file, 16-8192 MB (default 512). When full, the oldest packets are
+                              overwritten, so the capture always ends with the most recent traffic.
 .PARAMETER Archive            Archive the collection when done (7-Zip if present, else Compress-Archive).
 .PARAMETER ArchivePassword    SecureString; encrypts the 7-Zip archive (AES-256, headers encrypted).
                               NOTE: 7-Zip receives the password on its command line (visible to local admins).
@@ -85,7 +92,7 @@
                               analyze them and links to the tools' official pages. Recollect runs none of those tools.
 
 .NOTES
-    Version : 4.0.0
+    Version : 4.0.1
     License : BSD 3-Clause (SPDX-License-Identifier: BSD-3-Clause). Copyright (c) 2026, seliyyah-dfir.
               See LICENSE. Provided "as is", without warranty of any kind.
     Tested  : syntax-targeted at Windows PowerShell 5.1 (the common endpoint default).
@@ -136,6 +143,8 @@ param(
     [string]$YaraRules,                           # opt-in: .yar file for Windows.Detection.Yara.Process (Full)
     [string]$LolDriversCsv,                       # optional: local LOLDrivers CSV/JSON export for hash matching
     [switch]$DefenderQuarantine,                  # opt-in: copy Defender quarantine (live malware samples)
+    [switch]$NetworkCapture,                      # opt-in: capture network traffic with pktmon while collecting
+    [ValidateRange(16, 8192)][int]$NetworkCaptureMaxMB = 512,
     [switch]$Archive,
     [securestring]$ArchivePassword,
     [switch]$NoAnalysisReadme                     # skip the ANALYSIS_README.txt guidance files
@@ -145,7 +154,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Continue'
 $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
 
-$ScriptVersion  = '4.0.0'
+$ScriptVersion  = '4.0.1'
 $ScriptStartUtc = [DateTime]::UtcNow
 # Guided setup when started with no parameters at all (for example by recollect.cmd); manual mode otherwise.
 $GuidedMode     = ($PSBoundParameters.Count -eq 0)
@@ -609,7 +618,7 @@ function Invoke-GuidedSetup {
 
     $g = [ordered]@{ CaseId = ''; Operator = $DefaultOperator; CollectionProfile = ''; Memory = $false; OutputPath = $DefaultOutput
         AllowSystemDrive = $false; SpaceConfirmed = $false; DefenderQuarantine = $false; YaraRules = $null; LolDriversCsv = $null
-        KapeSkipBrowserData = $false
+        KapeSkipBrowserData = $false; NetworkCapture = $false
         Archive = $false; ArchivePassword = $null; RamBytes = $ram; Command = '' }
 
     Write-Host ''
@@ -723,6 +732,13 @@ function Invoke-GuidedSetup {
         }
         Write-Host ''
     }
+    if ($level -ge 1) {
+        Write-Host '  Network capture' -ForegroundColor White
+        Write-UiWrapped ('Records all network traffic on this computer while Recollect runs ({0}), with Windows'' built-in pktmon, and saves it as a .pcapng file for Wireshark. It can catch malware calling home during the collection.' -f $ProfileInfo[$g.CollectionProfile].Time) -Indent 4 -Color DarkGray
+        Write-UiWrapped 'Unencrypted traffic (HTTP, FTP, older SMB, LDAP and similar) is recorded in full and can contain passwords: treat the capture as sensitive. Up to 512 MB; the oldest packets are overwritten after that.' -Indent 4 -Color DarkGray
+        $g.NetworkCapture = Read-UiYesNo 'Capture network traffic while collecting?' $false
+        Write-Host ''
+    }
     Write-Host '  Archive' -ForegroundColor White
     if ($sevenZip) {
         Write-UiWrapped 'Packs the finished collection into one 7-Zip file, which can be encrypted with a password (AES-256).' -Indent 4 -Color DarkGray
@@ -749,6 +765,7 @@ function Invoke-GuidedSetup {
     if ($g.LolDriversCsv) { $cmd += @('-LolDriversCsv', (Format-UiArg $g.LolDriversCsv)) }
     if ($g.YaraRules) { $cmd += @('-YaraRules', (Format-UiArg $g.YaraRules)) }
     if ($g.KapeSkipBrowserData) { $cmd += '-KapeSkipBrowserData' }
+    if ($g.NetworkCapture) { $cmd += '-NetworkCapture' }
     if ($g.Archive) { $cmd += '-Archive' }
     $g.Command = $cmd -join ' '
 
@@ -761,6 +778,7 @@ function Invoke-GuidedSetup {
     if ($g.DefenderQuarantine) { $opts += 'Defender quarantine' }
     if ($g.LolDriversCsv) { $opts += 'LOLDrivers matching' }
     if ($g.YaraRules) { $opts += 'YARA scan' }
+    if ($g.NetworkCapture) { $opts += 'network capture' }
     if ($level -ge 4 -and $kape) { $opts += $(if ($g.KapeSkipBrowserData) { 'KAPE browser data left out' } else { 'KAPE browser data included' }) }
     if ($g.Archive) { $opts += $(if ($g.ArchivePassword) { 'archive (password protected)' } elseif ($sevenZip) { 'archive (no password)' } else { 'archive (.zip, no encryption)' }) }
     Write-Host ''
@@ -1027,7 +1045,7 @@ $Sys32 = Join-Path $env:SystemRoot 'System32'
 $Exe = @{}
 foreach ($exeName in 'hostname', 'whoami', 'systeminfo', 'ipconfig', 'arp', 'route', 'netstat', 'tasklist', 'schtasks',
     'quser', 'qwinsta', 'net', 'netsh', 'reg', 'wevtutil', 'w32tm', 'manage-bde', 'driverquery', 'vssadmin', 'cmd',
-    'sc', 'auditpol', 'gpresult', 'nbtstat', 'cmdkey', 'klist', 'fsutil', 'logman') {
+    'sc', 'auditpol', 'gpresult', 'nbtstat', 'cmdkey', 'klist', 'fsutil', 'logman', 'pktmon') {
     $Exe[$exeName] = Join-Path $Sys32 "$exeName.exe"
 }
 
@@ -1077,13 +1095,13 @@ if ($GuidedMode) {
     $CaseId = $g.CaseId; $Operator = $g.Operator; $CollectionProfile = $g.CollectionProfile; $OutputPath = $g.OutputPath
     $Memory = [switch]$g.Memory; $AllowSystemDrive = [switch]$g.AllowSystemDrive; $DefenderQuarantine = [switch]$g.DefenderQuarantine
     $Archive = [switch]$g.Archive; $ArchivePassword = $g.ArchivePassword; $YaraRules = $g.YaraRules; $LolDriversCsv = $g.LolDriversCsv
-    $KapeSkipBrowserData = [switch]$g.KapeSkipBrowserData
+    $KapeSkipBrowserData = [switch]$g.KapeSkipBrowserData; $NetworkCapture = [switch]$g.NetworkCapture
     $script:SpaceConfirmed = $g.SpaceConfirmed
     # Recorded in the manifest's Parameters exactly as if they had been typed (the password never is).
     foreach ($k in 'CaseId', 'Operator', 'CollectionProfile', 'OutputPath', 'YaraRules', 'LolDriversCsv') {
         if ($g[$k]) { $PSBoundParameters[$k] = $g[$k] }
     }
-    foreach ($k in 'Memory', 'AllowSystemDrive', 'DefenderQuarantine', 'Archive', 'KapeSkipBrowserData') { if ($g[$k]) { $PSBoundParameters[$k] = [switch]$true } }
+    foreach ($k in 'Memory', 'AllowSystemDrive', 'DefenderQuarantine', 'Archive', 'KapeSkipBrowserData', 'NetworkCapture') { if ($g[$k]) { $PSBoundParameters[$k] = [switch]$true } }
     Write-Log 'Launch mode: guided setup'
     Write-Log "Manual-mode equivalent: $($g.Command)"
     Write-Host ''
@@ -1193,6 +1211,7 @@ $RamBytes = 0
 try { $RamBytes = [int64](Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).TotalPhysicalMemory } catch {}
 
 $requiredGB = Get-RequiredGB $CollectionProfile $Memory.IsPresent $RamBytes
+if ($NetworkCapture) { $requiredGB += [int][math]::Ceiling($NetworkCaptureMaxMB * 2 / 1024) }   # .etl plus .pcapng
 $freeGB = Get-FreeSpaceGB $CollectionsBase
 if ($null -eq $freeGB) {
     Write-Log "Free space on '$CollectionsBase' could not be determined (UNC path?). Recommended: $requiredGB GB." 'WARN'
@@ -1315,6 +1334,12 @@ foreach ($v in $AllVolumes) {
 }
 
 # --- Opt-in collectors: say clearly what they do before anything runs ---
+if ($NetworkCapture) {
+    if ($Ctx.Level -lt 1) { Write-Log '-NetworkCapture is ignored with the Memory Only profile (it captures while the live steps run).' }
+    else {
+        Write-Log ('-NetworkCapture: all network traffic will be recorded with pktmon while the live steps run (up to {0} MB, then the oldest packets are overwritten). Unencrypted traffic is recorded in full and can contain passwords: treat the capture as sensitive.' -f $NetworkCaptureMaxMB)
+    }
+}
 if ($DefenderQuarantine) {
     Write-Log '-DefenderQuarantine: the Defender quarantine will be copied. These are LIVE malware samples (RC4-obfuscated, not directly runnable). Handle the collection as malware.' 'WARN'
     if ($Archive -and -not $ArchivePassword) {
@@ -1902,6 +1927,162 @@ function Get-SysmonEventRows {
     if ($n -ge $Cap) { Write-Error "${LogLabel}: stopped at $Cap events; the rest are only in the .evtx file (and in evtx_all.csv)" }
 }
 
+# Network events (4.0.1): who connected to this computer, from where, and where it connected, from the COPIED logs.
+# Field names checked against real events (Security 4624/4648, Terminal Services, RDP client, BITS, OpenSSH, firewall,
+# WLAN, NetworkProfile); WinRM, SMB client and failed logons follow Microsoft's documented schemas. An event type
+# without a specific layout lists its fields in Detail. Local-only noise (logons without a remote address, console
+# sessions, the "Identifying..." network placeholder) is left out. Returns $null for an event to skip.
+$script:NetSidNames = @{}
+function ConvertTo-NetworkRow {
+    param([string]$Area, [int]$Id, [hashtable]$Data, [datetime]$TimeCreatedUtc, [long]$RecordId, [string]$LogLabel, [string]$UserSid)
+    $v = { param($k) if ($Data.ContainsKey($k)) { [string]$Data[$k] } else { '' } }
+    $kv = { param([object[]]$P)
+        $parts = for ($i = 0; $i + 1 -lt $P.Count; $i += 2) {
+            if ("$($P[$i + 1])" -and "$($P[$i + 1])" -ne '-') { if ($P[$i]) { '{0} {1}' -f $P[$i], $P[$i + 1] } else { "$($P[$i + 1])" } }
+        }
+        @($parts) -join '; ' }
+    $acct = { param($dom, $usr) if ($usr -and $usr -ne '-') { if ($dom -and $dom -ne '-') { "$dom\$usr" } else { $usr } } else { '' } }
+    $addr = { param($ip, $port) if (-not $ip -or $ip -eq '-') { '' } elseif ($port -and $port -notin '-', '0') { if ($ip.Contains(':')) { "[$ip]:$port" } else { "${ip}:$port" } } else { $ip } }
+    $sidName = { param($sid) if (-not $sid -or $sid -notmatch '^S-1-') { return $sid }
+        if (-not $script:NetSidNames.ContainsKey($sid)) {
+            $script:NetSidNames[$sid] = try { (New-Object Security.Principal.SecurityIdentifier $sid).Translate([Security.Principal.NTAccount]).Value } catch { $sid }
+        }
+        $script:NetSidNames[$sid] }
+    $local = '', '-', '::1', '127.0.0.1', 'LOCAL'
+    $name = ''; $account = ''; $remote = ''; $target = ''; $detail = ''
+    switch ($Id) {
+        { $_ -in 4624, 4625 -and $Area -eq 'Logon' } {
+            $lt = & $v 'LogonType'
+            if ($lt -notin '3', '8', '10' -or (& $v 'IpAddress') -in $local) { return $null }
+            $kind = @{ '3' = 'network'; '8' = 'network (cleartext password)'; '10' = 'Remote Desktop' }[$lt]
+            $name = if ($Id -eq 4624) { "Logon: $kind" } else { "Failed logon: $kind" }
+            $account = & $acct (& $v 'TargetDomainName') (& $v 'TargetUserName')
+            $remote = & $addr (& $v 'IpAddress') (& $v 'IpPort'); $target = & $v 'WorkstationName'
+            $detail = & $kv @('logon type', $lt, 'auth', (& $v 'AuthenticationPackageName'), 'process', (& $v 'LogonProcessName').Trim(),
+                'status', (& $v 'Status'), 'sub-status', (& $v 'SubStatus'), 'reason', (& $v 'FailureReason'))
+        }
+        { $_ -eq 4648 -and $Area -eq 'Logon' } {
+            $srv = & $v 'TargetServerName'
+            if ($srv -in 'localhost', '', '-' -and (& $v 'IpAddress') -in $local) { return $null }
+            $name = 'Logon with explicit credentials'
+            $account = & $acct (& $v 'SubjectDomainName') (& $v 'SubjectUserName')
+            $remote = & $addr (& $v 'IpAddress') (& $v 'IpPort')
+            $target = ('{0} on {1}' -f (& $acct (& $v 'TargetDomainName') (& $v 'TargetUserName')), $srv)
+            $detail = & $kv @('process', (& $v 'ProcessName'))
+        }
+        { $_ -in 4778, 4779 -and $Area -eq 'Logon' } {
+            $name = if ($Id -eq 4778) { 'Remote Desktop session reconnected' } else { 'Remote Desktop session disconnected' }
+            $account = & $acct (& $v 'AccountDomain') (& $v 'AccountName'); $remote = & $v 'ClientAddress'
+            $target = & $v 'ClientName'; $detail = & $kv @('session', (& $v 'SessionName'))
+        }
+        { $_ -eq 5140 -and $Area -eq 'Logon' } {
+            $name = 'Network share accessed'
+            $account = & $acct (& $v 'SubjectDomainName') (& $v 'SubjectUserName')
+            $remote = & $addr (& $v 'IpAddress') (& $v 'IpPort')
+            $target = (& $v 'ShareName'); if (& $v 'ShareLocalPath') { $target += ' (' + (& $v 'ShareLocalPath') + ')' }
+        }
+        { $_ -eq 1149 -and $Area -eq 'Remote Desktop' } {
+            $name = 'Remote Desktop authentication succeeded'
+            $account = & $acct (& $v 'Param2') (& $v 'Param1'); $remote = & $v 'Param3'
+        }
+        { $_ -in 21, 22, 24, 25 -and $Area -eq 'Remote Desktop' } {
+            if ((& $v 'Address') -in $local) { return $null }
+            $name = @{ 21 = 'Remote Desktop session logon'; 22 = 'Remote Desktop shell started'; 24 = 'Remote Desktop session disconnected'; 25 = 'Remote Desktop session reconnected' }[$Id]
+            $account = & $v 'User'; $remote = & $v 'Address'; $detail = & $kv @('session', (& $v 'SessionID'))
+        }
+        { $_ -in 1024, 1102 -and $Area -eq 'Outgoing Remote Desktop' } {
+            $account = & $sidName $UserSid
+            if ($Id -eq 1024) { $name = 'Outgoing Remote Desktop connection'; $target = & $v 'Value' }
+            else { $name = 'Outgoing Remote Desktop transport'; $remote = & $v 'Value' }
+        }
+        { $_ -in 6, 91, 169 -and $Area -eq 'WinRM' } {
+            $name = @{ 6 = 'WinRM session created'; 91 = 'WinRM shell created'; 169 = 'WinRM user authenticated' }[$Id]
+            $account = & $v 'username'; $target = & $v 'connection'
+            $detail = & $kv @('resource', (& $v 'resourceUri'), 'auth', (& $v 'authenticationMechanism'))
+        }
+        { $_ -in 3, 59, 60 -and $Area -eq 'BITS' } {
+            if ($Id -eq 3) {
+                $name = 'BITS job created'; $account = & $v 'jobOwner'; $target = & $v 'jobTitle'; $detail = & $kv @('process', (& $v 'processPath'))
+            }
+            else {
+                $name = if ($Id -eq 59) { 'BITS transfer started' } else { 'BITS transfer finished' }
+                $target = & $v 'url'
+                $detail = & $kv @('job', (& $v 'name'), 'bytes', $(if ($Id -eq 60) { & $v 'bytesTransferred' } else { & $v 'fileLength' }),
+                    'result', $(if ($Id -eq 60 -and (& $v 'hr') -ne '0') { & $v 'hr' } else { '' }), 'peer', (& $v 'peer'))
+            }
+        }
+        { $_ -eq 4 -and $Area -eq 'OpenSSH' } {
+            $p = & $v 'payload'
+            if ($p -match '^(Accepted|Failed) (\S+) for (invalid user )?(\S+) from (\S+) port (\d+)') {
+                $name = "SSH logon $($Matches[1].ToLower())"; $account = $Matches[4]; $remote = & $addr $Matches[5] $Matches[6]
+                $detail = & $kv @('method', $Matches[2], '', $(if ($Matches[3]) { 'invalid user' } else { '' }))
+            }
+            elseif ($p -match '^(Invalid user (\S+) from (\S+)|Disconnected from (?:user (\S+) )?(\S+) port (\d+))') {
+                $name = 'SSH'; $detail = $p
+                if ($Matches[3]) { $account = $Matches[2]; $remote = $Matches[3] } else { $account = $Matches[4]; $remote = & $addr $Matches[5] $Matches[6] }
+            }
+            else { return $null }
+        }
+        { $_ -eq 3008 -and $Area -eq 'DNS' } {
+            $name = 'DNS query'; $target = & $v 'QueryName'
+            $detail = & $kv @('type', (& $v 'QueryType'), 'status', (& $v 'QueryStatus'), 'results', (& $v 'QueryResults'))
+        }
+        { $_ -in 2004, 2005, 2006, 2097, 2099, 2052 -and $Area -eq 'Firewall' } {
+            $name = if ($Id -in 2004, 2097) { 'Firewall rule added' } elseif ($Id -in 2005, 2099) { 'Firewall rule changed' } else { 'Firewall rule deleted' }
+            $account = & $sidName (& $v 'ModifyingUser'); $target = & $v 'RuleName'
+            $dir = @{ '1' = 'inbound'; '2' = 'outbound' }[(& $v 'Direction')]; $act = @{ '2' = 'allow'; '3' = 'block' }[(& $v 'Action')]
+            $detail = & $kv @('', $dir, '', $act, 'protocol', (& $v 'Protocol'), 'local ports', (& $v 'LocalPorts'), 'remote addresses', (& $v 'RemoteAddresses'),
+                'program', (& $v 'ApplicationPath'), 'changed by', (& $v 'ModifyingApplication'))
+        }
+        { $_ -in 8001, 8003 -and $Area -eq 'Wi-Fi' } {
+            $name = if ($Id -eq 8001) { 'Wi-Fi connected' } else { 'Wi-Fi disconnected' }
+            $target = & $v 'SSID'
+            $detail = & $kv @('security', (& $v 'AuthenticationAlgorithm'), 'adapter', (& $v 'InterfaceDescription'), 'reason', (& $v 'Reason'))
+        }
+        { $_ -in 10000, 10001 -and $Area -eq 'Network profile' } {
+            if ((& $v 'Name') -like 'Identifying*') { return $null }
+            $name = if ($Id -eq 10000) { 'Network connected' } else { 'Network disconnected' }
+            $target = & $v 'Name'; $detail = & $kv @('category', @{ '0' = 'public'; '1' = 'private'; '2' = 'domain' }[(& $v 'Category')])
+        }
+        { $_ -eq 31001 -and $Area -eq 'SMB client' } {
+            $name = 'SMB client logon to a server failed'; $account = & $v 'UserName'; $target = & $v 'ServerName'
+            $detail = & $kv @('status', (& $v 'Status'))
+        }
+    }
+    if (-not $name) {
+        $name = "Event $Id"
+        $detail = (@($Data.Keys | Sort-Object | ForEach-Object { '{0}={1}' -f $_, $Data[$_] }) -join '; ')
+    }
+    [pscustomobject][ordered]@{
+        TimeUtc = $TimeCreatedUtc.ToString('yyyy-MM-ddTHH:mm:ss.fffZ', $Inv); Area = $Area; EventId = $Id; Event = $name
+        Account = $account; RemoteAddress = $remote; Target = $target; Detail = $detail; RecordId = $RecordId; LogFile = $LogLabel
+    }
+}
+function Get-NetworkEventRows {
+    param([Parameter(Mandatory)][string]$Path, [string]$Area, [int[]]$Ids, [string]$LogLabel, [int]$Cap = 200000)
+    $filter = '*[System[(' + (($Ids | ForEach-Object { "EventID=$_" }) -join ' or ') + ')]]'
+    $q = New-Object System.Diagnostics.Eventing.Reader.EventLogQuery($Path, [System.Diagnostics.Eventing.Reader.PathType]::FilePath, $filter)
+    $reader = New-Object System.Diagnostics.Eventing.Reader.EventLogReader($q)
+    $n = 0
+    try {
+        while ($n -lt $Cap -and ($e = $reader.ReadEvent())) {
+            try {
+                $x = [xml]$e.ToXml()
+                $data = @{}
+                foreach ($d in $x.SelectNodes("//*[local-name()='EventData']/*[local-name()='Data']")) { $nm = $d.GetAttribute('Name'); if ($nm) { $data[$nm] = $d.InnerText } }
+                foreach ($d in $x.SelectNodes("//*[local-name()='UserData']/*/*")) { $data[$d.LocalName] = $d.InnerText }
+                $sid = if ($e.UserId) { $e.UserId.Value } else { '' }
+                $row = ConvertTo-NetworkRow -Area $Area -Id $e.Id -Data $data -TimeCreatedUtc $e.TimeCreated.ToUniversalTime() -RecordId $e.RecordId -LogLabel $LogLabel -UserSid $sid
+                if ($row) { $row }
+                $n++
+            }
+            finally { $e.Dispose() }
+        }
+    }
+    finally { $reader.Dispose() }
+    if ($n -ge $Cap) { Write-Error "${LogLabel}: stopped at $Cap events; the rest are only in the .evtx file (and in evtx_all.csv)" }
+}
+
 # Map a path under Get-ReadRoot back to the original C:\ path, so outputs show where the file really lives.
 function ConvertTo-OriginalPath {
     param([string]$Path)
@@ -2038,6 +2219,52 @@ Add-Collector -Phase 1 -Level 0 -Name 'Memory acquisition' -Format None -Needs '
     else { Invoke-External -FilePath $Tool.DumpIt.FullName -ArgumentList @('/QUIET', '/OUTPUT', $img) -OutFile $log -TimeoutSec 7200 }
     Get-ChildItem -Path "$memDir\*" -File -Exclude '*.log', '*.err' -ErrorAction Ignore |
         ForEach-Object { '{0} ({1:N0} MB)' -f $_.Name, ($_.Length / 1MB) }
+}
+
+# ---------- PHASE 1 (opt-in): NETWORK CAPTURE ----------
+# -NetworkCapture (4.0.1): Windows' built-in pktmon records traffic from right after the memory capture until the live
+# steps end (the stop step is the last one of phase 6), so a beacon or exfiltration during the collection is caught.
+# Captured at the network adapters only (--comp nics), so each packet appears once; full packets (--pkt-size 0);
+# circular file capped at -NetworkCaptureMaxMB. Converted to pcapng for Wireshark when stopped. Always stopped, even when
+# the run is aborted (see the finally block under EXECUTE). Needs Windows 10 2004+ (build 19041) for etl2pcap.
+$script:CaptureRunning = $false
+$script:CaptureStartUtc = $null
+function Stop-NetworkCapture {
+    if (-not $script:CaptureRunning) { return }
+    $log = Join-Path $Ctx.Root 'Network\pktmon.log'
+    $etl = Join-Path $Ctx.Root 'Network\capture.etl'
+    $pcap = Join-Path $Ctx.Root 'Network\capture.pcapng'
+    & $Exe.pktmon stop 2>&1 | Out-File -LiteralPath $log -Append -Encoding utf8
+    $stopExit = $LASTEXITCODE
+    $script:CaptureRunning = $false
+    $minutes = [math]::Round(([DateTime]::UtcNow - $script:CaptureStartUtc).TotalMinutes, 1)
+    $out = New-Object System.Collections.Generic.List[string]
+    if ($stopExit -ne 0) { Write-Error "pktmon stop returned exit code $stopExit (see Network\pktmon.log)" }
+    if (Test-Path -LiteralPath $etl) {
+        $out.Add(('captured {0:N1} MB over {1} min' -f ((Get-Item -LiteralPath $etl).Length / 1MB), $minutes))
+        & $Exe.pktmon etl2pcap $etl --out $pcap 2>&1 | Out-File -LiteralPath $log -Append -Encoding utf8
+        if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $pcap)) { $out.Add(('converted to Network\capture.pcapng ({0:N1} MB)' -f ((Get-Item -LiteralPath $pcap).Length / 1MB))) }
+        else { Write-Error 'conversion to pcapng failed; the .etl capture is kept (see Network\pktmon.log)' }
+    }
+    else { Write-Error 'no capture file was written (see Network\pktmon.log)' }
+    # Unload the packet-capture driver again: the start step confirmed no other pktmon session was running.
+    & $Exe.pktmon unload 2>&1 | Out-File -LiteralPath $log -Append -Encoding utf8
+    $out
+}
+Add-Collector -Phase 1 -Level 1 -Name 'Network capture: start (pktmon, opt-in)' -Format None -Enabled:$NetworkCapture.IsPresent -Action {
+    if (-not (Test-Path -LiteralPath $Exe.pktmon)) { throw 'pktmon.exe not found: network capture needs Windows 10 version 2004 or later' }
+    if ([Environment]::OSVersion.Version.Build -lt 19041) { throw "network capture needs Windows 10 version 2004 (build 19041) or later; this is build $([Environment]::OSVersion.Version.Build)" }
+    $log = Join-Path $Ctx.Root 'Network\pktmon.log'
+    $status = (& $Exe.pktmon status 2>&1 | Out-String)
+    $status | Out-File -LiteralPath $log -Encoding utf8
+    if ($status -notmatch '(?i)not running') { throw 'another pktmon capture is already running on this computer; it was left alone and no capture was started' }
+    $etl = Join-Path $Ctx.Root 'Network\capture.etl'
+    & $Exe.pktmon start --capture --comp nics --pkt-size 0 --file-name $etl --file-size $NetworkCaptureMaxMB --log-mode circular 2>&1 |
+        Out-File -LiteralPath $log -Append -Encoding utf8
+    if ($LASTEXITCODE -ne 0) { throw "pktmon start returned exit code $LASTEXITCODE (see Network\pktmon.log)" }
+    $script:CaptureRunning = $true
+    $script:CaptureStartUtc = [DateTime]::UtcNow
+    'capturing to Network\capture.etl (network adapters, full packets, up to {0} MB, oldest overwritten when full)' -f $NetworkCaptureMaxMB
 }
 
 # ---------- PHASE 2: TIME + NETWORK (Quick) ----------
@@ -3604,6 +3831,13 @@ Add-Collector -Phase 6 -Level 3 -Name 'Exfiltration and tunneling tools (rclone,
     }
 }
 
+# Last step of phase 6: stop the opt-in network capture once the live steps are done (registered here, after every
+# other phase 6 step, so it runs last in that phase).
+Add-Collector -Phase 6 -Level 1 -Name 'Network capture: stop and convert to pcapng' -Format None -Enabled:$NetworkCapture.IsPresent -Action {
+    if (-not $script:CaptureRunning) { return 'no capture was running (the start step did not start one)' }
+    Stop-NetworkCapture
+}
+
 # ---------- PHASE 7: PARSERS (run against collected COPIES only) ----------
 function Get-ParsedDir { param([string]$Name) $d = Join-Path $Ctx.Root "Parsed\$Name"; New-Item -ItemType Directory -Force -Path $d | Out-Null; $d }
 
@@ -3642,6 +3876,32 @@ Add-Collector -Phase 7 -Level 3 -Name 'Command events: command lines from the ev
 # Every Sysmon event in one readable CSV (3.9.0): process creation, network connections, file and registry changes,
 # DNS queries, process access, driver and DLL loads, WMI, ADS creation, tampering. No tool needed. Empty when Sysmon
 # isn't installed (the log then doesn't exist); EvtxECmd's evtx_all.csv holds the same events in its generic layout.
+Add-Collector -Phase 7 -Level 3 -Name 'Network events: remote logons, RDP, shares, WinRM, SSH, BITS, firewall, Wi-Fi in one CSV' -Format Csv -Out 'EventLogs\network_events.csv' -Action {
+    $specs = @(
+        @{ Log = 'Security.evtx'; Area = 'Logon'; Ids = 4624, 4625, 4648, 4778, 4779, 5140 }
+        @{ Log = 'Microsoft-Windows-TerminalServices-RemoteConnectionManager%4Operational.evtx'; Area = 'Remote Desktop'; Ids = , 1149 }
+        @{ Log = 'Microsoft-Windows-TerminalServices-LocalSessionManager%4Operational.evtx'; Area = 'Remote Desktop'; Ids = 21, 22, 24, 25 }
+        @{ Log = 'Microsoft-Windows-TerminalServices-RDPClient%4Operational.evtx'; Area = 'Outgoing Remote Desktop'; Ids = 1024, 1102 }
+        @{ Log = 'Microsoft-Windows-WinRM%4Operational.evtx'; Area = 'WinRM'; Ids = 6, 91, 169 }
+        @{ Log = 'OpenSSH%4Operational.evtx'; Area = 'OpenSSH'; Ids = , 4 }
+        @{ Log = 'Microsoft-Windows-SMBClient%4Security.evtx'; Area = 'SMB client'; Ids = , 31001 }
+        @{ Log = 'Microsoft-Windows-Bits-Client%4Operational.evtx'; Area = 'BITS'; Ids = 3, 59, 60 }
+        @{ Log = 'Microsoft-Windows-DNS-Client%4Operational.evtx'; Area = 'DNS'; Ids = , 3008 }
+        @{ Log = 'Microsoft-Windows-Windows Firewall With Advanced Security%4Firewall.evtx'; Area = 'Firewall'; Ids = 2004, 2005, 2006, 2052, 2097, 2099 }
+        @{ Log = 'Microsoft-Windows-WLAN-AutoConfig%4Operational.evtx'; Area = 'Wi-Fi'; Ids = 8001, 8003 }
+        @{ Log = 'Microsoft-Windows-NetworkProfile%4Operational.evtx'; Area = 'Network profile'; Ids = 10000, 10001 }
+    )
+    $rows = foreach ($s in $specs) {
+        $path = $null
+        foreach ($sub in 'EventLogs\All', 'EventLogs\Live') {
+            $p = Join-Path (Join-Path $Ctx.Root $sub) $s.Log
+            if (Test-Path -LiteralPath $p) { $path = $p; break }
+        }
+        if ($path) { Get-NetworkEventRows -Path $path -Area $s.Area -Ids $s.Ids -LogLabel $path.Substring($Ctx.Root.Length).TrimStart('\') }
+    }
+    @($rows) | Sort-Object TimeUtc
+}
+
 Add-Collector -Phase 7 -Level 3 -Name 'Sysmon events: every Sysmon event in one readable CSV' -Format Csv -Out 'EventLogs\sysmon_events.csv' -Action {
     $path = $null
     foreach ($sub in 'EventLogs\All', 'EventLogs\Live') {
@@ -3927,6 +4187,7 @@ try {
 }
 finally {
     Remove-Vss    # always remove the snapshot + symlink, even on Ctrl+C
+    if ($script:CaptureRunning) { try { [void](Stop-NetworkCapture 2>$null) } catch { } }   # never leave pktmon running
     if (-not $collectorsDone) { Restore-QuickEdit }   # aborted: give the operator their console back now
 }
 
@@ -4275,6 +4536,9 @@ WHAT IS HERE
   dns_cache.csv, netconfig.txt (IP configuration, ARP, routes, hosts file, proxy),
   net_extra.txt (port proxies, NetBIOS, Wi-Fi profiles), smb.txt (sessions, shares and files
   open by remote clients) and named_pipes.txt.
+  capture.pcapng / capture.etl  Only with -NetworkCapture: every packet sent or received
+  while the collection ran (pktmon). pktmon.log is pktmon's own output.
+  CAUTION: a capture can contain passwords from unencrypted traffic. Handle it as sensitive.
 
 WHY IT MATTERS
   It shows who the host was talking to when it was collected: command-and-control
@@ -4287,6 +4551,11 @@ HOW TO ANALYZE
   - netconfig.txt: a modified hosts file or an unexpected proxy is a red flag.
   - net_extra.txt: every port proxy needs an explanation.
   Look up IP addresses and domains on VirusTotal or AbuseIPDB.
+  capture.pcapng: open it in Wireshark (wireshark.org) on an analysis machine. Good first
+  steps: Statistics > Conversations and Endpoints (who talked to whom, how much), the
+  dns filter (names looked up), http.request and tls.handshake.extensions_server_name
+  (where HTTP and HTTPS went). Match IPs against connections.csv to find the process.
+  Who connected to this host earlier is in EventLogs\network_events.csv.
 '@ }
 
 @{ Paths = @('Processes'); Guide = '7.4'
@@ -4379,6 +4648,10 @@ WHAT IS HERE
                       PowerShell script blocks (4104), PowerShell start command lines (400),
                       process creation (Security 4688, Sysmon 1), WMI permanent consumers
                       (WMI-Activity 5861).
+  network_events.csv  (Deep and Full) Network activity from these logs, sorted by time:
+                      remote and RDP logons with source IP, failed logons, RDP sessions,
+                      outgoing RDP, share access, WinRM, SSH, BITS downloads, DNS queries
+                      (when that log is on), firewall rule changes, Wi-Fi and networks.
   sysmon_events.csv   (Deep and Full) Every Sysmon event in one readable table, when Sysmon
                       is installed: process creation, network connections, file and registry
                       changes, DNS queries, process access, driver and DLL loads, WMI, ADS
@@ -4403,6 +4676,9 @@ HOW TO ANALYZE
   group them by the ScriptBlockId in Detail. No 4688 rows, or 4688 rows without command
   lines, means process auditing (or its command-line option) was off. CAUTION: command
   lines can contain passwords.
+  network_events.csv: filter RemoteAddress for addresses outside your network, Event for
+  "Logon: Remote Desktop" and "Failed logon", and Target for admin shares (C$, ADMIN$).
+  A firewall rule added by an unusual program, or a BITS download from an odd URL, is a lead.
   sysmon_events.csv: open it in Timeline Explorer and filter Event (or EventId). Good starting
   points: Process created (1) for command lines and parents; Network connection (3) and DNS
   query (22) for where processes connected; Process accessed (10) with Target lsass.exe for

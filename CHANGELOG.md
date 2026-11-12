@@ -1,6 +1,41 @@
 # Changelog
 
-All notable changes to `Collect_v3.ps1`. Format based on [Keep a Changelog](https://keepachangelog.com/); versions follow [Semantic Versioning](https://semver.org/).
+All notable changes to Recollect (`recollect.ps1`, called `Collect_v3.ps1` before 4.0.0). Format based on [Keep a Changelog](https://keepachangelog.com/); versions follow [Semantic Versioning](https://semver.org/).
+
+## [4.0.1]
+
+### Added
+- **`EventLogs\network_events.csv` (Deep and up): network activity from the collected event logs in one time-ordered table.** No tool needed.
+  - **Inbound:** network and Remote Desktop logons with the source IP (Security 4624 types 3, 8, 10) and failed ones (4625), logons with explicit credentials to another server (4648), RDP session reconnects and disconnects (4778/4779), share access (5140), RDP authentication and remote sessions (Terminal Services 1149, 21, 22, 24, 25), WinRM sessions (6, 91, 169), OpenSSH logons accepted or failed, and SMB client logon failures (31001).
+  - **Outbound:** outgoing RDP connections (RDP client 1024/1102), BITS jobs and downloads with their URL (3, 59, 60), and DNS queries (DNS Client 3008, when that log is enabled).
+  - **Changes:** firewall rules added, changed or deleted (2004-2006, 2052, 2097, 2099), and Wi-Fi and network connections (WLAN 8001/8003, NetworkProfile 10000/10001).
+  - **Columns:** `TimeUtc`, `Area`, `EventId`, `Event`, `Account`, `RemoteAddress`, `Target`, `Detail`, `RecordId`, `LogFile`.
+  - **Left out:** local-only noise, such as logons without a remote address, console sessions and the "Identifying..." network placeholder. An event without a specific layout lists its fields in `Detail`.
+- **`-NetworkCapture` (opt-in): packet capture while the collection runs.**
+  - **How:** Windows' built-in pktmon (nothing is installed) records traffic from right after the memory capture until the live steps end, at the network adapters only (each packet once), full packets, in a circular file capped by **`-NetworkCaptureMaxMB`** (default 512).
+  - **Output:** when it stops, the `.etl` is converted to `Network\capture.pcapng` for Wireshark, and the packet-capture driver is unloaded again.
+  - **Safeguards:** it is always stopped, even when the run is aborted. If another pktmon capture is already running, it's left alone and the step fails with a note. It needs Windows 10 version 2004 or later, and isn't available with Memory Only.
+  - **Guided setup** offers it for every profile except Memory Only, default No, with a disclaimer: unencrypted traffic is recorded in full and can contain passwords.
+  - **Footprint:** the space check adds twice the cap, and the start-of-run log says the capture is on and sensitive.
+
+### Documentation
+- README: a "Network forensics" feature; `-NetworkCapture` among the opt-in extras.
+- User guide:
+  - Sections 1.2 (the guided option), 4 (Deep row) and 5 (`-NetworkCapture`, `-NetworkCaptureMaxMB`).
+  - 7.3: the capture files, first steps in Wireshark, and what only network-side sources (firewall and proxy logs, NetFlow, Zeek, Suricata) can provide.
+  - 7.7: `network_events.csv`.
+  - 7.14: what a capture can hold.
+  - The quick-reference table.
+- `ANALYSIS_README.txt` for `Network\` and `EventLogs\` describe the new files.
+
+### Verified
+- **`network_events.csv` against a real collection's logs:** 2,346 rows in about 9 seconds, sorted by time. That's Wi-Fi and network connections, outgoing RDP (server name and address), BITS jobs and downloads with URLs, and firewall rule changes with the account and program behind them. The field names were read from the real events.
+- **Event types not in the lab's logs, built from Microsoft's schemas:** RDP and network logons with a source IP, a logon without one (skipped), a failed logon, RDP reconnect, share access to `C$`, RDP authentication, a remote session, WinRM, SSH accepted and failed (invalid user), DNS, SMB client failure, and an unknown event (fields listed).
+- **The capture start and stop logic, with a stand-in pktmon:** the exact commands (`status`; `start --capture --comp nics --pkt-size 0 --file-name ... --file-size ... --log-mode circular`; `stop`; `etl2pcap ... --out ...`; `unload`); refusal when another capture is running; stop when nothing was started; and the abort-path stop.
+- **Guided setup:** the question appears for every profile except Memory Only, and reaches the summary and the manual command.
+- **Not yet verified:**
+  - A real pktmon capture. pktmon needs administrator rights, and the text `pktmon status` prints when idle ("not running") is assumed from Microsoft's documentation.
+  - The WinRM, SMB client, 4625, 4778/4779, 5140 and DNS rows against real events.
 
 ## [4.0.0]
 
