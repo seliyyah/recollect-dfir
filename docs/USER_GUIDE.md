@@ -14,9 +14,9 @@ There are two ways to start a collection:
 
 | | Guided setup | Manual mode |
 |---|---|---|
-| **Start it with** | `collect` (no parameters), or double-click `collect.cmd` | `collect` followed by parameters |
+| **Start it with** | `collect` (no parameters) or a double-click on `collect.cmd`, then choose **1** after the license | Choose **2** after the license and type the parameters at the prompt, or start with `collect` followed by parameters |
 | **Administrator rights** | Asked for automatically (a Windows permission prompt; the collection opens in a new window) | Run it from a terminal opened with *Run as administrator* |
-| **Questions** | License, then five short steps and a summary to confirm | Only the license (none with `-AcceptLicense`) |
+| **Questions** | License, then five short steps and a summary to confirm | Only the license (none with `-AcceptLicense`); at the prompt, a confirmation of what you typed |
 | **Best for** | Most collections, and anyone new to the tool | Experienced users, scripts, repeatable procedures |
 
 ### 1.1 How to launch `collect.cmd`
@@ -61,7 +61,15 @@ In Command Prompt, `cd X:\Toolkit` on its own does **not** change drives. Type `
 
 ### 1.2 Guided setup (recommended)
 
-After the license terms, the setup asks:
+Started without parameters, Recollect shows the license terms and then asks how to set up the collection:
+
+```
+  HOW DO YOU WANT TO SET UP THIS COLLECTION?
+   1  Guided setup   Five short questions with suggested answers. Recommended.
+   2  Manual mode    Type the parameters yourself, as on the command line.
+```
+
+Press Enter (or **1**) for guided setup, or **2** for manual mode (section 1.3). Guided setup then asks:
 
 | Step | Question | Default (press Enter) |
 |---|---|---|
@@ -77,7 +85,18 @@ Guided runs record their choices in `manifest.json` (`Script.Parameters`) as if 
 
 ### 1.3 Manual mode
 
-Give `collect` (or `Collect_v3.ps1`) any parameter and it asks no questions apart from the license and the warnings below. Open a terminal with *Run as administrator* and go to the toolkit folder:
+There are two ways in.
+
+**At the prompt:** start `collect` with no parameters, accept the license and choose **2**. Then type the parameters exactly as you would after `collect` on the command line, for example `-CaseId IR-001 -CollectionProfile Full -Memory -OutputPath F:\Collections`, and press Enter:
+
+- Recollect lists what it will run with and asks you to confirm. Without `-CollectionProfile` it shows the profile menu next; without `-CaseId` the case ID is `NOCASE`.
+- Type **?** for the list of parameters, **B** to go back to the choice, or **Q** to quit.
+- Parameter names can be shortened as long as they stay unambiguous (`-Coll` for `-CollectionProfile`). Switches can be turned off explicitly: `-Memory:$false`.
+- Only plain values are accepted (words, paths, quoted text, comma lists such as `-Volumes D:,F:`). Anything else is refused and nothing you type is ever run: no variables, `$(...)`, `;` or pipes.
+- `-ArchivePassword` isn't typed on the line. With `-Archive`, Recollect asks for the password afterwards, hidden and twice. `-VelociraptorArtifactArgs` (a hashtable) works only on the command line.
+- `Collection.log` records the typed line (`Parameters typed: collect ...`), and `manifest.json` records `Script.LaunchMode` as `manual (typed at the prompt)`.
+
+**On the command line:** give `collect` (or `Collect_v3.ps1`) any parameter and it asks no questions apart from the license and the warnings below. Open a terminal with *Run as administrator* and go to the toolkit folder:
 
 ```powershell
 cd X:\Toolkit

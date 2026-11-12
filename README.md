@@ -23,9 +23,9 @@ collect
 
 From PowerShell, type `.\collect`, or run `X:\Toolkit\collect.cmd` from any folder in either window. [User guide section 1.1](docs/USER_GUIDE.md#11-how-to-launch-collectcmd) covers PowerShell, Command Prompt and File Explorer step by step.
 
-**Guided setup** asks Windows for administrator rights, shows the license terms, then takes you through five short steps: case ID, profile, memory capture, output folder and options. Enter accepts the suggested value. A summary with time and space estimates comes last, and nothing is collected until you confirm. The summary also prints the equivalent manual command.
+`collect` asks Windows for administrator rights, shows the license terms, then asks how to set up the collection: **1 Guided setup** or **2 Manual mode**. **Guided setup** takes you through five short steps: case ID, profile, memory capture, output folder and options. Enter accepts the suggested value. A summary with time and space estimates comes last, and nothing is collected until you confirm. The summary also prints the equivalent manual command.
 
-**Manual mode:** give any parameter and no questions are asked except the license (`-AcceptLicense` skips that too). Run it from a terminal opened with *Run as administrator*:
+**Manual mode:** choose **2** and type the parameters at the prompt (`?` lists them; you confirm before anything starts). Or give them on the command line, where no questions are asked except the license (`-AcceptLicense` skips that too). For the command line, use a terminal opened with *Run as administrator*:
 
 ```bat
 collect -CaseId IR-001 -CollectionProfile Full -Memory -OutputPath X:\Collections

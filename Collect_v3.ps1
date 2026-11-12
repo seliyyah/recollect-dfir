@@ -443,6 +443,146 @@ function Read-UiChoice {
 # Quote a value for the manual-mode command line shown to the operator (cmd.exe passes double quotes through).
 function Format-UiArg { param([string]$Value) if ($Value -match '[\s&|<>^"]') { '"' + ($Value -replace '"', '') + '"' } else { $Value } }
 
+# Archive password, typed twice and hidden. Returns a SecureString, or $null after five failed attempts.
+function Read-ArchivePassword {
+    Write-UiWrapped '7-Zip receives the password on its command line, which process logging (Sysmon, event 4688, EDR) can record: use a password unique to this case.' -Indent 4 -Color DarkGray
+    for ($i = 0; $i -lt 5; $i++) {
+        $p1 = Read-Host '  Password' -AsSecureString
+        $p2 = Read-Host '  Confirm password' -AsSecureString
+        $ok = $false
+        $b1 = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($p1); $b2 = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($p2)
+        try {
+            $s1 = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($b1); $s2 = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($b2)
+            $ok = ($s1.Length -gt 0 -and $s1 -ceq $s2)
+        }
+        finally {
+            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b1); [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b2)
+            $s1 = $null; $s2 = $null
+        }
+        if ($ok) { return $p1 }
+        Write-UiText 'The passwords were empty or did not match. Try again.' Yellow
+    }
+    Write-UiText 'No password set; the archive will not be encrypted.' Yellow
+    $null
+}
+
+# After the license, when started without parameters: guided setup or manual mode. Returns 'guided' or 'manual'.
+function Read-LaunchMode {
+    Write-Host ''
+    Write-Host '  HOW DO YOU WANT TO SET UP THIS COLLECTION?' -ForegroundColor Cyan
+    Write-UiRule
+    Write-Host '   1  ' -ForegroundColor Cyan -NoNewline; Write-Host ('{0,-15}' -f 'Guided setup') -ForegroundColor White -NoNewline
+    Write-Host 'Five short questions with suggested answers. Recommended.' -ForegroundColor DarkGray
+    Write-Host '   2  ' -ForegroundColor Cyan -NoNewline; Write-Host ('{0,-15}' -f 'Manual mode') -ForegroundColor White -NoNewline
+    Write-Host 'Type the parameters yourself, as on the command line.' -ForegroundColor DarkGray
+    Write-Host ''
+    if ((Read-UiChoice -Prompt 'Choice (1-2)' -Max 2 -Default '1') -eq 2) { 'manual' } else { 'guided' }
+}
+
+# Manual mode at the prompt: parameters typed as after "collect". Parsed with PowerShell's own parser, but only plain
+# values are accepted (words, numbers, quoted text, comma lists, $true/$false after a colon): nothing typed here is
+# ever run. Returns an ordered dictionary of parameter name -> typed value, or $null to go back to guided setup.
+function Read-ManualParameters {
+    param([System.Collections.IDictionary]$Meta, [string[]]$Names)
+    $skip = 'AcceptLicense'                                    # already accepted at the prompt above
+    $noPrompt = @{ ArchivePassword = 'asked for separately, hidden, after you confirm'
+        VelociraptorArtifactArgs = 'a hashtable: use it on the command line (user guide, section 5)' }
+    $examples = @(
+        '-CaseId IR-2026-001 -CollectionProfile Standard'
+        '-CaseId IR-2026-001 -CollectionProfile Full -Memory -OutputPath F:\Collections'
+        '-CaseId IR-2026-001 -CollectionProfile MemoryOnly'
+    )
+    Write-Host ''
+    Write-Host '  MANUAL MODE' -ForegroundColor Cyan
+    Write-UiRule
+    Write-UiWrapped 'Type the parameters as you would after "collect" on the command line, then press Enter. For example:' -Color Gray
+    foreach ($x in $examples) { Write-UiText ('  ' + $x) DarkGray }
+    Write-UiWrapped 'Type ? for the list of parameters, B to go back to guided setup, or Q to quit.' -Color DarkGray
+    for ($try = 0; $try -lt 30; $try++) {
+        Write-Host ''
+        $line = Read-UiAnswer 'Parameters'
+        if (-not $line) { continue }
+        if ($line -match '^(?i)(b|back)$') { return $null }
+        if ($line -match '^(\?|(?i)help|-\?)$') {
+            Write-Host ''
+            foreach ($n in $Names) {
+                $t = $Meta[$n].ParameterType
+                $kind = if ($t -eq [switch]) { 'switch' } elseif ($t -eq [string[]]) { 'list' } elseif ($t -eq [string]) { 'text' } else { $t.Name }
+                $vs = @($Meta[$n].Attributes | Where-Object { $_ -is [System.Management.Automation.ValidateSetAttribute] })
+                if ($vs.Count) { $kind = ($vs[0].ValidValues -join ' | ') }
+                if ($noPrompt.ContainsKey($n)) { $kind = $noPrompt[$n] }
+                Write-Host ('    -{0,-26}' -f $n) -ForegroundColor White -NoNewline; Write-Host $kind -ForegroundColor DarkGray
+            }
+            Write-UiText 'Each one is described in docs\USER_GUIDE.md, section 5.' DarkGray
+            continue
+        }
+        $tokens = $null; $errs = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseInput("collect $line", [ref]$tokens, [ref]$errs)
+        if ($errs.Count) { Write-UiText ('That could not be read: {0}' -f $errs[0].Message) Yellow; continue }
+        $cmd = $ast.Find({ param($a) $a -is [System.Management.Automation.Language.CommandAst] }, $true)
+        $stmts = @($ast.EndBlock.Statements)
+        if (-not $cmd -or $stmts.Count -ne 1 -or $stmts[0] -isnot [System.Management.Automation.Language.PipelineAst] -or
+            @($stmts[0].PipelineElements).Count -ne 1) { Write-UiText 'Type only parameters, on one line.' Yellow; continue }
+        $plain = {
+            param($e)
+            if ($e -is [System.Management.Automation.Language.StringConstantExpressionAst]) { return , $e.Value }
+            if ($e -is [System.Management.Automation.Language.ConstantExpressionAst]) { return , [string]$e.Value }
+            if ($e -is [System.Management.Automation.Language.VariableExpressionAst] -and $e.VariablePath.UserPath -in 'true', 'false') { return , ($e.VariablePath.UserPath -eq 'true') }
+            if ($e -is [System.Management.Automation.Language.ArrayLiteralAst]) {
+                $items = foreach ($el in $e.Elements) { if ($el -is [System.Management.Automation.Language.StringConstantExpressionAst] -or $el -is [System.Management.Automation.Language.ConstantExpressionAst]) { [string]$el.Value } else { throw 'not plain' } }
+                return , [string[]]@($items)
+            }
+            throw 'not plain'
+        }
+        $out = [ordered]@{}; $problem = $null
+        $els = @($cmd.CommandElements | Select-Object -Skip 1)
+        for ($i = 0; $i -lt $els.Count -and -not $problem; $i++) {
+            $el = $els[$i]
+            if ($el -isnot [System.Management.Automation.Language.CommandParameterAst]) { $problem = "'$($el.Extent.Text)' isn't a parameter (they start with -)"; break }
+            $hits = @($Names | Where-Object { $_ -like "$($el.ParameterName)*" })
+            $exact = @($hits | Where-Object { $_ -eq $el.ParameterName })
+            if ($exact.Count) { $hits = $exact }
+            if ($hits.Count -ne 1) { $problem = $(if ($hits.Count) { "-$($el.ParameterName) could mean: -" + ($hits -join ', -') } else { "-$($el.ParameterName) isn't a Recollect parameter (type ? for the list)" }); break }
+            $name = $hits[0]; $type = $Meta[$name].ParameterType
+            if ($noPrompt.ContainsKey($name)) { $problem = "-${name}: $($noPrompt[$name])"; break }
+            try {
+                if ($type -eq [switch]) {
+                    $val = $true
+                    if ($el.Argument) { $val = [bool](& $plain $el.Argument) }
+                }
+                else {
+                    $argAst = $el.Argument
+                    if (-not $argAst) {
+                        if ($i + 1 -ge $els.Count -or $els[$i + 1] -is [System.Management.Automation.Language.CommandParameterAst]) { $problem = "-$name needs a value"; break }
+                        $i++; $argAst = $els[$i]
+                    }
+                    $val = & $plain $argAst
+                    if ($type -eq [string[]]) { $val = [string[]]@($val | ForEach-Object { "$_" -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
+                    else { $val = [string](@($val) -join ',') }
+                }
+            }
+            catch { $problem = "-${name}: only plain values are accepted here (no variables, commands or expressions)"; break }
+            $vs = @($Meta[$name].Attributes | Where-Object { $_ -is [System.Management.Automation.ValidateSetAttribute] })
+            if ($vs.Count -and @($vs[0].ValidValues | Where-Object { $_ -eq $val }).Count -eq 0) { $problem = "-$name must be one of: $($vs[0].ValidValues -join ', ')"; break }
+            if ($vs.Count) { $val = @($vs[0].ValidValues | Where-Object { $_ -eq $val })[0] }   # canonical spelling
+            if ($name -notin $skip) { $out[$name] = $val }
+        }
+        if ($problem) { Write-UiText $problem Yellow; continue }
+        if (-not $out.Count) { Write-UiText 'No parameters were given.' Yellow; continue }
+        Write-Host ''
+        Write-UiText 'Recollect will run with:' Gray
+        foreach ($k in $out.Keys) {
+            $shown = if ($out[$k] -is [bool]) { if ($out[$k]) { '(on)' } else { '(off)' } } elseif ($out[$k] -is [array]) { $out[$k] -join ', ' } else { $out[$k] }
+            Write-Host ('    -{0,-24}' -f $k) -ForegroundColor White -NoNewline; Write-Host $shown -ForegroundColor Gray
+        }
+        if (-not $out.Contains('CollectionProfile')) { Write-UiText 'No -CollectionProfile: you will be asked for the profile next.' DarkGray }
+        if (-not $out.Contains('CaseId')) { Write-UiText 'No -CaseId: the case ID will be NOCASE.' DarkGray }
+        Write-Host ''
+        if (Read-UiYesNo 'Continue with these parameters?' $true) { return $out }
+    }
+    Stop-GuidedSetup
+}
+
 # Guided setup: five short steps, then a summary. Returns the choices; nothing is collected or written here.
 function Invoke-GuidedSetup {
     param([string]$ToolsRoot, [string]$DefaultOutput, [string]$DefaultOperator)
@@ -475,7 +615,6 @@ function Invoke-GuidedSetup {
     Write-Host ''
     Write-Host '  GUIDED SETUP' -ForegroundColor Cyan
     Write-UiWrapped 'Five short steps, then a summary to confirm. Press Enter to accept the value in [brackets]; type Q at any prompt to quit. Nothing is collected until you confirm.' -Color Gray
-    Write-UiWrapped 'Manual mode: run collect with parameters instead (collect /? shows examples).' -Color DarkGray
 
     # 1. Case
     Write-UiStep 1 5 'Case details'
@@ -593,24 +732,7 @@ function Invoke-GuidedSetup {
     }
     $g.Archive = Read-UiYesNo 'Create an archive when done?' $false
     if ($g.Archive -and $sevenZip -and (Read-UiYesNo 'Protect the archive with a password?' $true)) {
-        Write-UiWrapped '7-Zip receives the password on its command line, which process logging (Sysmon, event 4688, EDR) can record: use a password unique to this case.' -Indent 4 -Color DarkGray
-        for ($i = 0; ; $i++) {
-            if ($i -ge 5) { Write-UiText 'No password set; the archive will not be encrypted.' Yellow; break }
-            $p1 = Read-Host '  Password' -AsSecureString
-            $p2 = Read-Host '  Confirm password' -AsSecureString
-            $ok = $false
-            $b1 = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($p1); $b2 = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($p2)
-            try {
-                $s1 = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($b1); $s2 = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($b2)
-                $ok = ($s1.Length -gt 0 -and $s1 -ceq $s2)
-            }
-            finally {
-                [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b1); [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b2)
-                $s1 = $null; $s2 = $null
-            }
-            if ($ok) { $g.ArchivePassword = $p1; break }
-            Write-UiText 'The passwords were empty or did not match. Try again.' Yellow
-        }
+        $g.ArchivePassword = Read-ArchivePassword
     }
     if ($g.DefenderQuarantine -and -not $g.ArchivePassword) {
         Write-UiWrapped 'Note: the collection will hold malware samples without password protection.' -Color Yellow
@@ -657,7 +779,7 @@ function Invoke-GuidedSetup {
     Write-UiRule
     Write-UiText 'The same collection in manual mode (no prompts except the license):' DarkGray
     Write-Host ('    ' + $g.Command) -ForegroundColor Gray     # one line, so it copies cleanly
-    if ($g.ArchivePassword) { Write-UiWrapped '(Archive passwords are never shown or logged. In manual mode, use -ArchivePassword from a PowerShell window.)' -Indent 4 -Color DarkGray }
+    if ($g.ArchivePassword) { Write-UiWrapped '(Archive passwords are never shown or logged. Manual mode at the prompt asks for it, hidden, after -Archive.)' -Indent 4 -Color DarkGray }
     Write-Host ''
     if (-not (Read-UiYesNo 'Start the collection now?' $true)) { Stop-GuidedSetup }
     $g
@@ -929,6 +1051,27 @@ else { $ToolkitRoot }
 # --- Guided setup (no parameters) or profile selection (manual mode) ---
 $Levels = @{ MemoryOnly = 0; Quick = 1; Standard = 2; Deep = 3; Full = 4 }
 $script:SpaceConfirmed = $false
+$script:TypedManual = $null
+# Started without parameters: after the license, choose guided setup or manual mode (parameters typed at a prompt).
+while ($GuidedMode -and -not $script:TypedManual) {
+    if ((Read-LaunchMode) -eq 'guided') { break }
+    $ownNames = @($MyInvocation.MyCommand.ScriptBlock.Ast.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath })
+    $typed = Read-ManualParameters -Meta $MyInvocation.MyCommand.Parameters -Names $ownNames
+    if ($null -eq $typed) { continue }                       # B: back to the choice
+    foreach ($k in $typed.Keys) {
+        $val = $typed[$k]
+        if ($MyInvocation.MyCommand.Parameters[$k].ParameterType -eq [switch]) { $val = [switch][bool]$val }
+        Set-Variable -Name $k -Value $val
+        $PSBoundParameters[$k] = $val
+    }
+    if ($Archive -and (Read-UiYesNo 'Protect the archive with a password?' $true)) { $ArchivePassword = Read-ArchivePassword }
+    if ($ToolsPath) { $ToolsRoot = $ToolsPath }
+    $script:TypedManual = (@($typed.Keys | ForEach-Object {
+        $v = $typed[$_]
+        if ($v -is [bool]) { if ($v) { "-$_" } else { "-${_}:`$false" } } else { "-$_ " + (@($v | ForEach-Object { Format-UiArg $_ }) -join ',') }
+    }) -join ' ')
+    $GuidedMode = $false
+}
 if ($GuidedMode) {
     $g = Invoke-GuidedSetup -ToolsRoot $ToolsRoot -DefaultOutput (Join-Path $ToolkitRoot 'Collections') -DefaultOperator $Operator
     $CaseId = $g.CaseId; $Operator = $g.Operator; $CollectionProfile = $g.CollectionProfile; $OutputPath = $g.OutputPath
@@ -946,7 +1089,11 @@ if ($GuidedMode) {
     Write-Host ''
 }
 else {
-    Write-Log 'Launch mode: manual (parameters)'
+    if ($script:TypedManual) {
+        Write-Log 'Launch mode: manual (parameters typed at the prompt)'
+        Write-Log "Parameters typed: collect $($script:TypedManual)"
+    }
+    else { Write-Log 'Launch mode: manual (parameters)' }
     if (-not $CollectionProfile) {
         if ($NonInteractive) { Write-Log '-CollectionProfile is required with -NonInteractive.' 'ERROR'; exit 1 }
         Write-Host ''
@@ -3884,7 +4031,7 @@ Set-ManifestField $mScript 'SHA256'     { $scriptSha }
 Set-ManifestField $mScript 'Parameters' { $bound }
 Set-ManifestField $mScript 'License'    { 'BSD-3-Clause' }
 Set-ManifestField $mScript 'LicenseAccepted' { $script:LicenseAccepted }
-Set-ManifestField $mScript 'LaunchMode' { if ($GuidedMode) { 'guided setup' } else { 'manual (parameters)' } }
+Set-ManifestField $mScript 'LaunchMode' { if ($GuidedMode) { 'guided setup' } elseif ($script:TypedManual) { 'manual (typed at the prompt)' } else { 'manual (parameters)' } }
 
 $mCase = New-Object System.Collections.Specialized.OrderedDictionary
 Set-ManifestField $mCase 'CaseId'   { $CaseId }

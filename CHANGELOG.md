@@ -19,6 +19,11 @@ All notable changes to `Collect_v3.ps1`. Format based on [Keep a Changelog](http
   - **The disclaimer is honest about what remains:** KAPE's Dropbox metadata target still copies the DPAPI key folder, and its mRemoteNG target saved connection credentials.
 
 ### Changed
+- **Guided or manual, chosen after the license.** Started without parameters, Recollect now asks "How do you want to set up this collection?" with two choices: **1 Guided setup** (Enter, as before) or **2 Manual mode**.
+  - **What manual mode offers:** a prompt where parameters are typed as after `collect`. It shows examples, `?` lists every parameter with its type or allowed values, **B** goes back and **Q** quits. Unambiguous short names work (`-Coll`), and switches can be turned off with `-Memory:$false`.
+  - **Confirmation:** the typed line is shown back for confirmation. With `-Archive`, the password is asked for afterwards, hidden and twice.
+  - **Safe parsing:** the line is read with PowerShell's own parser, but only plain values are accepted. Variables, `$(...)`, `;` and pipes are refused, so nothing typed is ever run.
+  - **Logging:** `Collection.log` records the typed line, and `Script.LaunchMode` says `manual (typed at the prompt)`.
 - **New name: Recollect.** A new startup banner with large slanted RECOLLECT letters, drawn in a different color on each launch (picked at random from seven bright console colors), and a framed panel (name, version, credit, tagline, repository). The console screens, `Collection.log`, `manifest.txt`, the folder READMEs and the docs now say Recollect. **Unchanged:** the launcher `collect.cmd`, the script file `Collect_v3.ps1`, the repository address and every parameter, so existing launch commands and scripts keep working. Log and manifest lines that said "Collect_v3" now say "Recollect" (for example the `Recollect log | started ...` header and "from this collection run (Recollect itself)"): update any filters that matched the old text.
 - `ANALYSIS_README.txt` for `Disk\` and `EventLogs\` describe the new files and how to read them.
 - Standard runs take about 2 minutes longer (the stream scan); Deep runs about 2 ms per Sysmon event longer.
@@ -33,6 +38,12 @@ All notable changes to `Collect_v3.ps1`. Format based on [Keep a Changelog](http
   - 7.13 and 7.14: the opt-out and what it does and doesn't remove.
 
 ### Verified
+- **The guided or manual choice:** the real script was run to the point where the collection folder would be created, with scripted answers and the admin check stubbed.
+  - A full typed line, including a comma list, reached the settings, the manifest parameters and the log.
+  - `?` listed the parameters.
+  - Refused, each with a clear message: an unknown parameter, `$(calc)`, a bare command, `; calc`, a value outside the allowed set, a missing value, an ambiguous short name, and a typed `-ArchivePassword`. No process was started.
+  - `-Coll quick -Case X -Memory:$false -Archive` worked, with the hidden password prompt after it.
+  - B went back to the choice; declining the confirmation allowed retyping; a missing profile brought up the menu.
 - **Stream scan:**
   - A test folder: an executable hidden in a text file's stream (flagged as a PE), a PowerShell command in a folder's stream, a 3 MB stream (hashed, not copied), an empty stream, and routine Zone.Identifier and OLE property streams (counted, not listed). Copies and hashes matched.
   - The live system drive, not elevated: 445,000 files and folders in about 2¼ minutes; only Malwarebytes' marks turned up, and they are now on the routine list.
