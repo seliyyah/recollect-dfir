@@ -92,7 +92,7 @@
                               analyze them and links to the tools' official pages. Recollect runs none of those tools.
 
 .NOTES
-    Version : 4.0.1
+    Version : 4.0.2
     License : BSD 3-Clause (SPDX-License-Identifier: BSD-3-Clause). Copyright (c) 2026, seliyyah-dfir.
               See LICENSE. Provided "as is", without warranty of any kind.
     Tested  : syntax-targeted at Windows PowerShell 5.1 (the common endpoint default).
@@ -154,7 +154,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Continue'
 $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
 
-$ScriptVersion  = '4.0.1'
+$ScriptVersion  = '4.0.2'
 $ScriptStartUtc = [DateTime]::UtcNow
 # Guided setup when started with no parameters at all (for example by recollect.cmd); manual mode otherwise.
 $GuidedMode     = ($PSBoundParameters.Count -eq 0)
@@ -335,7 +335,7 @@ $ProfileInfo = [ordered]@{
                     Text = 'Live system state only: processes, network, logons, services, persistence.' }
     Standard   = @{ Label = 'Standard';    Time = 'about 10 min';   SpaceGB = 5
                     Text = 'Quick, plus a shadow copy of registry hives, all event logs, Prefetch, Autoruns and command history.' }
-    Deep       = @{ Label = 'Deep';        Time = '30 to 60 min';   SpaceGB = 15
+    Deep       = @{ Label = 'Deep';        Time = '60 to 90 min';   SpaceGB = 15
                     Text = 'Standard, plus raw NTFS files ($MFT, $J), browser and user activity, a signature scan and parsed timelines.' }
     Full       = @{ Label = 'Full';        Time = '1 to 2 hours';   SpaceGB = 100
                     Text = 'Deep, plus KAPE and Velociraptor collections, pagefile and hiberfil, the full Recycle Bin and the Search index.' }

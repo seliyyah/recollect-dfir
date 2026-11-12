@@ -10,7 +10,7 @@
 
 A single PowerShell script that collects forensic evidence from a live Windows machine, in order of volatility. It drives the standard free DFIR toolset (Sysinternals, Eric Zimmerman's tools, KAPE, Velociraptor, WinPmem / Magnet RAM Capture / DumpIt, RawCopy) and writes a hashed, self-documenting collection: a manifest, per-step results, and SHA-256 hashes of every file.
 
-![PowerShell 5.1](https://img.shields.io/badge/PowerShell-5.1-blue) ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011%20%7C%20Server-informational) ![Version](https://img.shields.io/badge/version-4.0.1-green) ![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue)
+![PowerShell 5.1](https://img.shields.io/badge/PowerShell-5.1-blue) ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011%20%7C%20Server-informational) ![Version](https://img.shields.io/badge/version-4.0.2-green) ![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue)
 
 > 🛡️ **A blue-team tool** for incident responders, forensic analysts and researchers. Use it only on systems you own or are authorized to examine. See [Purpose and responsible use](#purpose-and-responsible-use).
 
@@ -45,7 +45,7 @@ Results go to `X:\Toolkit\Collections\<CaseId>_<COMPUTER>_<UTC time>\`. Use `-Ou
 |---|---|---|
 | `Quick` | Volatile state: processes, network, sessions, services, persistence, event-log channel and ETW tampering checks | 2–3 min |
 | `Standard` | + shadow copy, registry hives, all event logs, Prefetch, system and security config, Autoruns, driver hashes and loaded kernel modules, WFP filters, Sysmon config, SSH keys, PowerShell transcripts, Mark-of-the-Web, command-line histories | ~10 min |
-| `Deep` | + `$MFT`, USN journal, SRUM, LNK / Jump Lists, browser artifacts, all Zimmerman parsers, extra internal drives, RMM tools, IIS, exfiltration-tool search | 30–60 min |
+| `Deep` | + `$MFT`, USN journal, SRUM, LNK / Jump Lists, browser artifacts, all Zimmerman parsers, extra internal drives, RMM tools, IIS, exfiltration-tool search | 60–90 min |
 | `Full` | + KAPE, Velociraptor, pagefile / hiberfil, full Recycle Bin, Sigcheck of System32 | 1–2 hours |
 | `MemoryOnly` | RAM image, plus the clock and time zone. Nothing else | ~5 min for 32 GB |
 | `-Memory` | RAM image first (any profile) | ~5 min for 32 GB |

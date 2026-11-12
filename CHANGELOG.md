@@ -2,6 +2,17 @@
 
 All notable changes to Recollect (`recollect.ps1`, called `Collect_v3.ps1` before 4.0.0). Format based on [Keep a Changelog](https://keepachangelog.com/); versions follow [Semantic Versioning](https://semver.org/).
 
+## [4.0.2]
+
+### Changed
+- **Deep's typical time is now 60 to 90 minutes (was 30 to 60)**, in guided setup's profile menu, the README and the user guide. On the lab laptop, the Sigcheck scan of user-writable folders alone takes about 44 minutes (two Deep runs: 43 and 44 min), and a Deep run with memory and the packet capture took 74 minutes. Memory capture time is still shown separately.
+
+### Verified
+- **A live elevated Deep run with memory and `-NetworkCapture`:** 107 OK, 5 expected skips (shadow-copy fallbacks not needed), 2 WARNs caused by the USB output drive dropping out once (324 disk errors in one minute, during the `$MFT` parse).
+- **`network_events.csv` live:** 2,414 rows in 12 seconds, sorted by time: firewall rule changes, BITS jobs and downloads, network and Wi-Fi connections, outgoing RDP.
+- **Unusual alternate data streams from a real shadow copy:** 505,636 files and folders scanned in 1.9 minutes; routine streams counted in the summary row.
+- **The real `pktmon list` layout:** component Id, MAC and name on one line, as the lookup expects. The Wi-Fi adapter was matched by MAC, not by the fallback. 38,033 packets over 64 minutes, no events lost; `capture_wifi.pcapng` decodes in tshark (IPv4 and IPv6, TCP, TLS, HTTP, DNS, ARP); the driver was unloaded and the PktMon service ended stopped.
+
 ## [4.0.1]
 
 ### Added
