@@ -295,11 +295,15 @@ function Show-Banner {
         'Preserve the evidence before it changes.'
         'github.com/seliyyah/windows-dfir-collector'
     )
+    # A different color each launch, picked at random from bright colors that read well on a dark console.
+    # Nothing is saved between runs (nothing is written to the computer being collected), so a color can repeat.
+    $palette  = 'Cyan', 'Green', 'Yellow', 'Magenta', 'Red', 'Blue', 'White'
+    $artColor = $palette[(Get-Random -Maximum $palette.Count)]
     $artWidth = ($art | Measure-Object -Property Length -Maximum).Maximum
     $inner    = ($box | Measure-Object -Property Length -Maximum).Maximum + 2
     $pad      = ' ' * (2 + [math]::Max(0, [int][math]::Floor(($artWidth - $inner - 2) / 2)))
     Write-Host ''
-    foreach ($l in $art) { Write-Host ('  ' + $l) -ForegroundColor Cyan }
+    foreach ($l in $art) { Write-Host ('  ' + $l) -ForegroundColor $artColor }
     Write-Host ''
     Write-Host ($pad + '+' + ('-' * $inner) + '+') -ForegroundColor DarkGray
     for ($i = 0; $i -lt $box.Count; $i++) {
