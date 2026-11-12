@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Collect_v3.ps1 - Endpoint DFIR live-response / triage collection framework.
+    recollect.ps1 - Endpoint DFIR live-response / triage collection framework.
 
 .DESCRIPTION
     Data-driven collection framework. Every artifact is a registered "collector"
@@ -28,14 +28,14 @@
       1 Memory | 2 Time + network | 3 Processes/sessions/services | 4 System config
       5 VSS snapshot + disk artifacts | 6 Slow live tools | 7 Parsers | 8 KAPE / Velociraptor
 
-    Easiest start: run collect.cmd (in the toolkit folder or at the drive root) with no parameters. Guided setup
+    Easiest start: run recollect.cmd (in the toolkit folder or at the drive root) with no parameters. Guided setup
     asks for administrator rights, then for the case ID, profile, memory capture, output folder and options, shows
     a summary with the equivalent manual command, and collects only after you confirm. Started with no parameters,
-    Collect_v3.ps1 itself runs the same guided setup.
+    recollect.ps1 itself runs the same guided setup.
 
     Manual mode (any parameter given): run from an elevated prompt, ideally from removable media or a network share:
-      collect -CollectionProfile Standard -CaseId IR-2026-001 -OutputPath X:\Collections
-      powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect_v3.ps1 `
+      recollect -CollectionProfile Standard -CaseId IR-2026-001 -OutputPath X:\Collections
+      powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\recollect.ps1 `
           -CollectionProfile Standard -CaseId IR-2026-001 -OutputPath X:\Collections -NonInteractive -AcceptLicense
 
     License terms: every run first shows the BSD 3-Clause license (with its warranty disclaimer) and an
@@ -85,7 +85,7 @@
                               analyze them and links to the tools' official pages. Recollect runs none of those tools.
 
 .NOTES
-    Version : 3.9.0
+    Version : 4.0.0
     License : BSD 3-Clause (SPDX-License-Identifier: BSD-3-Clause). Copyright (c) 2026, seliyyah-dfir.
               See LICENSE. Provided "as is", without warranty of any kind.
     Tested  : syntax-targeted at Windows PowerShell 5.1 (the common endpoint default).
@@ -145,9 +145,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Continue'
 $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
 
-$ScriptVersion  = '3.9.0'
+$ScriptVersion  = '4.0.0'
 $ScriptStartUtc = [DateTime]::UtcNow
-# Guided setup when started with no parameters at all (for example by collect.cmd); manual mode otherwise.
+# Guided setup when started with no parameters at all (for example by recollect.cmd); manual mode otherwise.
 $GuidedMode     = ($PSBoundParameters.Count -eq 0)
 $Inv            = [Globalization.CultureInfo]::InvariantCulture
 
@@ -293,7 +293,7 @@ function Show-Banner {
         "Recollect  |  Incident Response Collector  |  v$ScriptVersion"
         'Created by Tony Rosario'
         'Preserve the evidence before it changes.'
-        'github.com/seliyyah/windows-dfir-collector'
+        'github.com/seliyyah/recollect-dfir'
     )
     # A different color each launch, picked at random from bright colors that read well on a dark console.
     # Nothing is saved between runs (nothing is written to the computer being collected), so a color can repeat.
@@ -479,7 +479,7 @@ function Read-LaunchMode {
     if ((Read-UiChoice -Prompt 'Choice (1-2)' -Max 2 -Default '1') -eq 2) { 'manual' } else { 'guided' }
 }
 
-# Manual mode at the prompt: parameters typed as after "collect". Parsed with PowerShell's own parser, but only plain
+# Manual mode at the prompt: parameters typed as after "recollect". Parsed with PowerShell's own parser, but only plain
 # values are accepted (words, numbers, quoted text, comma lists, $true/$false after a colon): nothing typed here is
 # ever run. Returns an ordered dictionary of parameter name -> typed value, or $null to go back to guided setup.
 function Read-ManualParameters {
@@ -495,7 +495,7 @@ function Read-ManualParameters {
     Write-Host ''
     Write-Host '  MANUAL MODE' -ForegroundColor Cyan
     Write-UiRule
-    Write-UiWrapped 'Type the parameters as you would after "collect" on the command line, then press Enter. For example:' -Color Gray
+    Write-UiWrapped 'Type the parameters as you would after "recollect" on the command line, then press Enter. For example:' -Color Gray
     foreach ($x in $examples) { Write-UiText ('  ' + $x) DarkGray }
     Write-UiWrapped 'Type ? for the list of parameters, B to go back to guided setup, or Q to quit.' -Color DarkGray
     for ($try = 0; $try -lt 30; $try++) {
@@ -517,7 +517,7 @@ function Read-ManualParameters {
             continue
         }
         $tokens = $null; $errs = $null
-        $ast = [System.Management.Automation.Language.Parser]::ParseInput("collect $line", [ref]$tokens, [ref]$errs)
+        $ast = [System.Management.Automation.Language.Parser]::ParseInput("recollect $line", [ref]$tokens, [ref]$errs)
         if ($errs.Count) { Write-UiText ('That could not be read: {0}' -f $errs[0].Message) Yellow; continue }
         $cmd = $ast.Find({ param($a) $a -is [System.Management.Automation.Language.CommandAst] }, $true)
         $stmts = @($ast.EndBlock.Statements)
@@ -739,7 +739,7 @@ function Invoke-GuidedSetup {
     }
 
     # Manual-mode equivalent (no password: it can't be typed on a command line safely).
-    $cmd = @('collect', '-CaseId', (Format-UiArg $g.CaseId))
+    $cmd = @('recollect', '-CaseId', (Format-UiArg $g.CaseId))
     if ($g.Operator -ne $DefaultOperator) { $cmd += @('-Operator', (Format-UiArg $g.Operator)) }
     $cmd += @('-CollectionProfile', $g.CollectionProfile)
     if ($g.Memory -and -not $isMemOnly) { $cmd += '-Memory' }
@@ -1004,7 +1004,7 @@ else {
 Write-Log ('License terms (BSD 3-Clause and authorized-use notice) accepted by {0} via {1}' -f $Operator, $script:LicenseAccepted.Method)
 
 if (-not (Test-IsAdmin)) {
-    Write-Log 'Recollect needs administrator rights. Start it with collect.cmd (it asks Windows for permission), or from a terminal opened with "Run as administrator".' 'ERROR'; exit 1
+    Write-Log 'Recollect needs administrator rights. Start it with recollect.cmd (it asks Windows for permission), or from a terminal opened with "Run as administrator".' 'ERROR'; exit 1
 }
 if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) {
     Write-Log "32-bit PowerShell on a 64-bit OS (WOW64 redirection). Use: $env:windir\sysnative\WindowsPowerShell\v1.0\powershell.exe" 'ERROR'
@@ -1091,7 +1091,7 @@ if ($GuidedMode) {
 else {
     if ($script:TypedManual) {
         Write-Log 'Launch mode: manual (parameters typed at the prompt)'
-        Write-Log "Parameters typed: collect $($script:TypedManual)"
+        Write-Log "Parameters typed: recollect $($script:TypedManual)"
     }
     else { Write-Log 'Launch mode: manual (parameters)' }
     if (-not $CollectionProfile) {
@@ -4115,7 +4115,7 @@ Get-ChildItem -LiteralPath $CollectionRoot -Directory -ErrorAction Ignore |
 # same name is never overwritten. Paths are relative to the collection root; '*' matches one
 # folder level (a user name, a browser profile, 'Program Files*').
 
-$ReadmeGuideUrl = 'https://github.com/seliyyah/windows-dfir-collector/blob/main/docs/USER_GUIDE.md'
+$ReadmeGuideUrl = 'https://github.com/seliyyah/recollect-dfir/blob/main/docs/USER_GUIDE.md'
 $ReadmeEz = 'https://ericzimmerman.github.io/'
 $ReadmeTools = [ordered]@{
     'Timeline Explorer'          = $ReadmeEz

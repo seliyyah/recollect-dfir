@@ -1,10 +1,10 @@
 # Recollect: Windows DFIR Live-Response Collector
 
-*Formerly Collect_v3. The launcher (`collect.cmd`), the script file (`Collect_v3.ps1`) and this repository's address are unchanged, so existing launch commands keep working.*
+*Formerly Collect_v3. Since 4.0.0 the launcher is `recollect.cmd`, the script `recollect.ps1` and the repository `recollect-dfir`; the old GitHub address redirects here. Launch commands that used `collect` or `Collect_v3.ps1` need the new names (see the [changelog](CHANGELOG.md)).*
 
 A single PowerShell script that collects forensic evidence from a live Windows machine, in order of volatility. It drives the standard free DFIR toolset (Sysinternals, Eric Zimmerman's tools, KAPE, Velociraptor, WinPmem / Magnet RAM Capture / DumpIt, RawCopy) and writes a hashed, self-documenting collection: a manifest, per-step results, and SHA-256 hashes of every file.
 
-![PowerShell 5.1](https://img.shields.io/badge/PowerShell-5.1-blue) ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011%20%7C%20Server-informational) ![Version](https://img.shields.io/badge/version-3.9.0-green) ![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue)
+![PowerShell 5.1](https://img.shields.io/badge/PowerShell-5.1-blue) ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011%20%7C%20Server-informational) ![Version](https://img.shields.io/badge/version-4.0.0-green) ![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue)
 
 > 🛡️ **A blue-team tool** for incident responders, forensic analysts and researchers. Use it only on systems you own or are authorized to examine. See [Purpose and responsible use](#purpose-and-responsible-use).
 
@@ -13,25 +13,25 @@ A single PowerShell script that collects forensic evidence from a live Windows m
 ## Quick start
 
 1. Set up the toolkit drive as described in [Tools/README.md](Tools/README.md).
-2. On the target machine, open a Command Prompt on the toolkit drive and type **`collect`**. In Windows Explorer you can double-click `collect.cmd` instead.
+2. On the target machine, open a Command Prompt on the toolkit drive and type **`recollect`**. In Windows Explorer you can double-click `recollect.cmd` instead.
 
 ```bat
 X:
 cd \Toolkit
-collect
+recollect
 ```
 
-From PowerShell, type `.\collect`, or run `X:\Toolkit\collect.cmd` from any folder in either window. [User guide section 1.1](docs/USER_GUIDE.md#11-how-to-launch-collectcmd) covers PowerShell, Command Prompt and File Explorer step by step.
+From PowerShell, type `.\recollect`, or run `X:\Toolkit\recollect.cmd` from any folder in either window. [User guide section 1.1](docs/USER_GUIDE.md#11-how-to-launch-recollectcmd) covers PowerShell, Command Prompt and File Explorer step by step.
 
-`collect` asks Windows for administrator rights, shows the license terms, then asks how to set up the collection: **1 Guided setup** or **2 Manual mode**. **Guided setup** takes you through five short steps: case ID, profile, memory capture, output folder and options. Enter accepts the suggested value. A summary with time and space estimates comes last, and nothing is collected until you confirm. The summary also prints the equivalent manual command.
+`recollect` asks Windows for administrator rights, shows the license terms, then asks how to set up the collection: **1 Guided setup** or **2 Manual mode**. **Guided setup** takes you through five short steps: case ID, profile, memory capture, output folder and options. Enter accepts the suggested value. A summary with time and space estimates comes last, and nothing is collected until you confirm. The summary also prints the equivalent manual command.
 
 **Manual mode:** choose **2** and type the parameters at the prompt (`?` lists them; you confirm before anything starts). Or give them on the command line, where no questions are asked except the license (`-AcceptLicense` skips that too). For the command line, use a terminal opened with *Run as administrator*:
 
 ```bat
-collect -CaseId IR-001 -CollectionProfile Full -Memory -OutputPath X:\Collections
+recollect -CaseId IR-001 -CollectionProfile Full -Memory -OutputPath X:\Collections
 ```
 
-`collect /?` shows more examples. `collect.cmd` starts Windows PowerShell with `-NoProfile`, and with the execution policy bypassed for that one process. The full `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect_v3.ps1 ...` form still works.
+`recollect /?` shows more examples. `recollect.cmd` starts Windows PowerShell with `-NoProfile`, and with the execution policy bypassed for that one process. The full `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\recollect.ps1 ...` form still works.
 
 Results go to `X:\Toolkit\Collections\<CaseId>_<COMPUTER>_<UTC time>\`. Use `-OutputPath` to send them elsewhere. **Never write output to the suspect machine's internal disks.**
 
@@ -52,7 +52,7 @@ Opt-in extras: `-YaraRules <file.yar>` (process-memory YARA scan, Full), `-LolDr
 
 ## Features
 
-- **Guided or manual:** type `collect` for a guided setup with clear questions, sensible defaults and a summary to confirm. Give parameters for manual mode, or add `-NonInteractive` to script it. Both modes record the same manifest, and guided runs also log the equivalent manual command.
+- **Guided or manual:** type `recollect` for a guided setup with clear questions, sensible defaults and a summary to confirm. Give parameters for manual mode, or add `-NonInteractive` to script it. Both modes record the same manifest, and guided runs also log the equivalent manual command.
 - **Order of volatility:** memory → network → processes → configuration → disk artifacts → parsers.
 - **Forensically careful:** refuses to write to the system drive or other internal disks unless explicitly allowed; calls Windows binaries by full path; timestamps in UTC; removes the shadow copy and temporary link it creates, even on Ctrl+C.
 - **Chain of custody:** `manifest.json` (script hash, parameters, host, timing, tool inventory, per-step results) and `FileHashes.csv` (SHA-256 of every collected file).
@@ -78,8 +78,8 @@ Opt-in extras: `-YaraRules <file.yar>` (process-memory YARA scan, Full), `-LolDr
 
 ```text
 .
-├── collect.cmd           # launcher: guided setup, or manual mode with parameters
-├── Collect_v3.ps1        # the collector (must stay next to the Tools folder)
+├── recollect.cmd         # launcher: guided setup, or manual mode with parameters
+├── recollect.ps1         # the collector (must stay next to the Tools folder)
 ├── README.md
 ├── CHANGELOG.md
 ├── LICENSE               # BSD 3-Clause

@@ -24,7 +24,7 @@ Tools\
 └── LOLDrivers-main\          optional: the LOLDrivers repository, or any file named loldrivers*.csv/json
 ```
 
-Guided setup (`collect` with no parameters) offers the YARA scan only with rule files in `Tools\YARA\`. Rules that ship inside other tools, such as LOLDrivers' driver-file rules, aren't offered. It offers LOLDrivers matching when it finds `loldrivers*.csv/json`, or the repository's `loldrivers.io\content\api\drivers.csv`, anywhere under `Tools\`. In manual mode, `-YaraRules` and `-LolDriversCsv` accept files anywhere.
+Guided setup (`recollect` with no parameters) offers the YARA scan only with rule files in `Tools\YARA\`. Rules that ship inside other tools, such as LOLDrivers' driver-file rules, aren't offered. It offers LOLDrivers matching when it finds `loldrivers*.csv/json`, or the repository's `loldrivers.io\content\api\drivers.csv`, anywhere under `Tools\`. In manual mode, `-YaraRules` and `-LolDriversCsv` accept files anywhere.
 
 ## Where to get them
 

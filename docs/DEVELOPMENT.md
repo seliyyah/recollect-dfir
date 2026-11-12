@@ -1,6 +1,6 @@
 # Development notes
 
-For anyone (human or AI assistant) changing `Collect_v3.ps1`.
+For anyone (human or AI assistant) changing `recollect.ps1`.
 
 ## Architecture
 
@@ -29,7 +29,7 @@ For anyone (human or AI assistant) changing `Collect_v3.ps1`.
 
 - **External tools** run through `Invoke-External`, which captures stdout/stderr, enforces a hard timeout, converts UTF-16 output to UTF-8 and stores the exit code in `$script:LastExit`. An optional `-MaxOutputMB` stops a tool whose output passes that size (a tool stuck repeating an error); after any stop, `Compress-RepeatedLines` collapses repeated blocks in the partial output and the step throws, so it reports FAIL.
 - **Launch and guided setup (3.8.0):**
-  - `collect.cmd` only finds the script, checks elevation (`fltmc`), self-elevates with `/elevated` for guided setup, and runs `powershell.exe -NoProfile -ExecutionPolicy Bypass -File`. Keep it ASCII and CRLF.
+  - `recollect.cmd` only finds the script, checks elevation (`fltmc`), self-elevates with `/elevated` for guided setup, and runs `powershell.exe -NoProfile -ExecutionPolicy Bypass -File`. Keep it ASCII and CRLF.
   - `$GuidedMode` is true when `$PSBoundParameters` is empty. The order is: banner, then license, then admin and architecture checks, then `Invoke-GuidedSetup`, which returns a hashtable and writes nothing. The script then assigns the choices to the parameter variables and adds them to `$PSBoundParameters`, so the manifest records them. Nothing is created before the summary is confirmed.
   - The console UI helpers (`Write-Ui*`, `Read-Ui*`, `Show-ProfileMenu`, `$ProfileInfo`) are plain ASCII. `Read-UiAnswer` handles Q by calling `Stop-GuidedSetup`, which exits 0.
   - Drive types come from `Win32_DiskDrive`, not `Get-Disk`, whose first call took 18 s on the lab laptop.
@@ -75,7 +75,7 @@ Only on a lab VM or a dedicated test machine. Snapshot the VM first.
 
 1. Parse check:
    ```powershell
-   [void][System.Management.Automation.Language.Parser]::ParseFile('.\Collect_v3.ps1',[ref]$null,[ref]$e); $e
+   [void][System.Management.Automation.Language.Parser]::ParseFile('.\recollect.ps1',[ref]$null,[ref]$e); $e
    ```
 2. Run `Quick`, then `Standard`, `Deep`, and `Full -Memory`.
 3. After each run, read `CollectorResults.csv` (filter Status ≠ OK), then `manifest.json`, and spot-check the output files themselves: a step marked OK can still produce empty output.
@@ -125,7 +125,7 @@ First tested **without admin rights** through a harness that loads the script's 
 | Unusual alternate data streams (3.9.0) | `Find-AdsStream` (C# via Add-Type) verified on planted streams (PE in a file's stream, script in a folder's stream, 3 MB, empty, routine ones) and on the live system drive, not elevated (445,000 entries, about 2¼ minutes). **Unverified:** an elevated run reading from the shadow copy. |
 | Sysmon events CSV (3.9.0) | `ConvertTo-SysmonRow` verified with events built from the Sysmon schema; the `Get-SysmonEventRows` reader loop and its cap verified against a real collected log of another channel. **Unverified:** a real Sysmon log and the own-run marking (no Sysmon on the lab laptop). |
 | `-KapeSkipBrowserData` (3.9.0) | `Get-KapeTargetList` verified against the lab KAPE's `!SANS_Triage.tkape` (17 targets without `WebBrowsers`); guided question verified with scripted answers. **Unverified:** a Full run with the switch. |
-| Guided setup and `collect.cmd` (3.8.0) | Guided setup verified with scripted answers (a fake `Read-Host`) in six scenarios: invalid input re-asked, Q and "no" at the summary exit cleanly, no memory tool, the YARA folder rule, a password mismatch, the system drive accepted. The real script was run to the point where the collection folder would be created, with the admin check stubbed: choices reach the parameter variables, the manifest parameters and the log; a declined license exits; manual `MemoryOnly` and the new menu work. `collect.cmd` verified for `/?`, script discovery (beside it, one level down, a space in the path, none, two), the non-elevated manual message, and argument pass-through. Live guided run (Quick, with an archive) verified on the lab laptop: the UAC prompt, the elevated window, the manifest and log entries, the empty-folder cleanup and the archive hash. **Unverified:** a full Memory Only collection, and the earlier QuickEdit switch-off live. |
+| Guided setup and `recollect.cmd` (3.8.0) | Guided setup verified with scripted answers (a fake `Read-Host`) in six scenarios: invalid input re-asked, Q and "no" at the summary exit cleanly, no memory tool, the YARA folder rule, a password mismatch, the system drive accepted. The real script was run to the point where the collection folder would be created, with the admin check stubbed: choices reach the parameter variables, the manifest parameters and the log; a declined license exits; manual `MemoryOnly` and the new menu work. `recollect.cmd` verified for `/?`, script discovery (beside it, one level down, a space in the path, none, two), the non-elevated manual message, and argument pass-through. Live guided run (Quick, with an archive) verified on the lab laptop: the UAC prompt, the elevated window, the manifest and log entries, the empty-folder cleanup and the archive hash. **Unverified:** a full Memory Only collection, and the earlier QuickEdit switch-off live. |
 
 Fixtures still to build on the lab laptop (from the 3.4.0 handoff): load a benign signed test driver through a service and delete the service key; add a WFP block filter for a dummy app; shrink and disable test event-log channels; `sc failure <testsvc> actions= run/60000 command= ...`; a real renamed rclone; a Notepad unsaved tab on Windows 11; a YARA rule matching a known running process (done in 3.4.2).
 

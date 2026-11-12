@@ -2,6 +2,26 @@
 
 All notable changes to `Collect_v3.ps1`. Format based on [Keep a Changelog](https://keepachangelog.com/); versions follow [Semantic Versioning](https://semver.org/).
 
+## [4.0.0]
+
+The Recollect rename is complete: the script, the launcher and the repository now carry the name too. Nothing about what is collected, or how, has changed.
+
+### Changed (breaking)
+- **Script:** `Collect_v3.ps1` is now **`recollect.ps1`**.
+- **Launcher:** `collect.cmd` is now **`recollect.cmd`**: type `recollect` in Command Prompt, `.\recollect` in PowerShell, or double-click it. It looks for `recollect.ps1` next to itself or one folder below, as before.
+- **Repository:** `seliyyah/windows-dfir-collector` is now **`seliyyah/recollect-dfir`**. GitHub redirects the old address for the web page and for `git clone`, pull and push. To point an existing clone at the new address: `git remote set-url origin https://github.com/seliyyah/recollect-dfir.git`.
+- **What to update:**
+  - Saved launch commands and scheduled tasks: replace `collect` with `recollect`, and `Collect_v3.ps1` with `recollect.ps1`.
+  - Toolkit drives: copy the new `recollect.cmd` and `recollect.ps1`, and delete the old `collect.cmd` and `Collect_v3.ps1`, so two versions aren't side by side.
+  - Every parameter is unchanged.
+- In the collection, `manifest.json` `Script.Name` is now `recollect.ps1`, and the manual-mode command shown in guided setup and recorded in `Collection.log` starts with `recollect`.
+- The links in the docs, the banner panel and every `ANALYSIS_README.txt` point to the new repository address.
+
+### Verified
+- `recollect.cmd`: `/?`; finding `recollect.ps1` beside it and one folder down; the non-elevated manual-mode message; argument pass-through.
+- Guided setup and manual mode at the prompt, with scripted answers, through to the point where the collection folder would be created. The equivalent command and the typed line both start with `recollect`.
+- No reference to `Collect_v3.ps1`, `collect.cmd` or the old repository address remains outside this changelog's history.
+
 ## [3.9.0]
 
 ### Added

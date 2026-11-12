@@ -1,6 +1,6 @@
 # Recollect — Windows DFIR Collection Script: User Guide
 
-**Script version:** 3.9.0  **Runs on:** Windows 10 / 11 / Server 2016+ with Windows PowerShell 5.1  **Needs:** Administrator rights
+**Script version:** 4.0.0  **Runs on:** Windows 10 / 11 / Server 2016+ with Windows PowerShell 5.1  **Needs:** Administrator rights
 
 > 🛡️ Recollect is a **blue-team** tool for incident responders, forensic analysts and researchers. It orchestrates freely available forensic tools, and their authors are credited in the [README](../README.md#credits). Please read [Purpose and responsible use](../README.md#purpose-and-responsible-use) before using it on a real case.
 
@@ -14,12 +14,12 @@ There are two ways to start a collection:
 
 | | Guided setup | Manual mode |
 |---|---|---|
-| **Start it with** | `collect` (no parameters) or a double-click on `collect.cmd`, then choose **1** after the license | Choose **2** after the license and type the parameters at the prompt, or start with `collect` followed by parameters |
+| **Start it with** | `recollect` (no parameters) or a double-click on `recollect.cmd`, then choose **1** after the license | Choose **2** after the license and type the parameters at the prompt, or start with `recollect` followed by parameters |
 | **Administrator rights** | Asked for automatically (a Windows permission prompt; the collection opens in a new window) | Run it from a terminal opened with *Run as administrator* |
 | **Questions** | License, then five short steps and a summary to confirm | Only the license (none with `-AcceptLicense`); at the prompt, a confirmation of what you typed |
 | **Best for** | Most collections, and anyone new to the tool | Experienced users, scripts, repeatable procedures |
 
-### 1.1 How to launch `collect.cmd`
+### 1.1 How to launch `recollect.cmd`
 
 Replace `X:` with your toolkit drive's letter: File Explorer → **This PC** shows it. Use whichever of these suits you; they all do the same thing.
 
@@ -30,34 +30,34 @@ Replace `X:` with your toolkit drive's letter: File Explorer → **This PC** sho
 **Easiest: one line, from any folder, in either window**
 
 ```powershell
-X:\Toolkit\collect.cmd
+X:\Toolkit\recollect.cmd
 ```
 
-**File Explorer, no typing:** open `X:\Toolkit` and double-click **`collect.cmd`**.
+**File Explorer, no typing:** open `X:\Toolkit` and double-click **`recollect.cmd`**.
 
 **PowerShell, from the toolkit folder**
 
 ```powershell
 X:                # switch to the toolkit drive; the prompt becomes PS X:\>
 cd \Toolkit       # go into the toolkit folder; the prompt becomes PS X:\Toolkit>
-.\collect         # PowerShell needs .\ to run a file from the current folder
+.\recollect         # PowerShell needs .\ to run a file from the current folder
 ```
 
-`cd X:\Toolkit` does the first two steps at once. Typing plain `collect` in PowerShell gives *"The command collect was not found, but does exist in the current location"*. That's PowerShell's safety rule; add the `.\`.
+`cd X:\Toolkit` does the first two steps at once. Typing plain `recollect` in PowerShell gives *"The command recollect was not found, but does exist in the current location"*. That's PowerShell's safety rule; add the `.\`.
 
 **Command Prompt, from the toolkit folder**
 
 ```bat
 X:                &rem switch to the toolkit drive; the prompt becomes X:\>
 cd \Toolkit       &rem go into the toolkit folder; the prompt becomes X:\Toolkit>
-collect           &rem no .\ needed in Command Prompt
+recollect           &rem no .\ needed in Command Prompt
 ```
 
 In Command Prompt, `cd X:\Toolkit` on its own does **not** change drives. Type `X:` first, or use `cd /d X:\Toolkit`.
 
-**Then:** started without parameters, `collect` asks Windows for permission (choose **Yes**), and the guided setup opens in a new window. For manual mode, open the window with *Run as administrator* first (right-click PowerShell, Command Prompt or Windows Terminal → *Run as administrator*) and add parameters to any of the commands above, for example `X:\Toolkit\collect.cmd -CaseId IR-001 -CollectionProfile Standard`.
+**Then:** started without parameters, `recollect` asks Windows for permission (choose **Yes**), and the guided setup opens in a new window. For manual mode, open the window with *Run as administrator* first (right-click PowerShell, Command Prompt or Windows Terminal → *Run as administrator*) and add parameters to any of the commands above, for example `X:\Toolkit\recollect.cmd -CaseId IR-001 -CollectionProfile Standard`.
 
-**Shorter still:** `collect.cmd` also works at the root of the drive, with the toolkit in a folder one level below it (`X:\collect.cmd` next to `X:\Toolkit\`). Then `X:\collect` from anywhere, or a double-click on the drive itself, is all it takes.
+**Shorter still:** `recollect.cmd` also works at the root of the drive, with the toolkit in a folder one level below it (`X:\recollect.cmd` next to `X:\Toolkit\`). Then `X:\recollect` from anywhere, or a double-click on the drive itself, is all it takes.
 
 ### 1.2 Guided setup (recommended)
 
@@ -87,26 +87,26 @@ Guided runs record their choices in `manifest.json` (`Script.Parameters`) as if 
 
 There are two ways in.
 
-**At the prompt:** start `collect` with no parameters, accept the license and choose **2**. Then type the parameters exactly as you would after `collect` on the command line, for example `-CaseId IR-001 -CollectionProfile Full -Memory -OutputPath F:\Collections`, and press Enter:
+**At the prompt:** start `recollect` with no parameters, accept the license and choose **2**. Then type the parameters exactly as you would after `recollect` on the command line, for example `-CaseId IR-001 -CollectionProfile Full -Memory -OutputPath F:\Collections`, and press Enter:
 
 - Recollect lists what it will run with and asks you to confirm. Without `-CollectionProfile` it shows the profile menu next; without `-CaseId` the case ID is `NOCASE`.
 - Type **?** for the list of parameters, **B** to go back to the choice, or **Q** to quit.
 - Parameter names can be shortened as long as they stay unambiguous (`-Coll` for `-CollectionProfile`). Switches can be turned off explicitly: `-Memory:$false`.
 - Only plain values are accepted (words, paths, quoted text, comma lists such as `-Volumes D:,F:`). Anything else is refused and nothing you type is ever run: no variables, `$(...)`, `;` or pipes.
 - `-ArchivePassword` isn't typed on the line. With `-Archive`, Recollect asks for the password afterwards, hidden and twice. `-VelociraptorArtifactArgs` (a hashtable) works only on the command line.
-- `Collection.log` records the typed line (`Parameters typed: collect ...`), and `manifest.json` records `Script.LaunchMode` as `manual (typed at the prompt)`.
+- `Collection.log` records the typed line (`Parameters typed: recollect ...`), and `manifest.json` records `Script.LaunchMode` as `manual (typed at the prompt)`.
 
-**On the command line:** give `collect` (or `Collect_v3.ps1`) any parameter and it asks no questions apart from the license and the warnings below. Open a terminal with *Run as administrator* and go to the toolkit folder:
+**On the command line:** give `recollect` (or `recollect.ps1`) any parameter and it asks no questions apart from the license and the warnings below. Open a terminal with *Run as administrator* and go to the toolkit folder:
 
 ```powershell
 cd X:\Toolkit
 ```
 
-Then run **one** of these, changing `-CaseId` to your own case number. The `collect` form and the long `powershell.exe` form below are equivalent: `collect.cmd` adds `-NoProfile -ExecutionPolicy Bypass` for you.
+Then run **one** of these, changing `-CaseId` to your own case number. The `recollect` form and the long `powershell.exe` form below are equivalent: `recollect.cmd` adds `-NoProfile -ExecutionPolicy Bypass` for you.
 
 ```bat
-collect -CaseId IR-001 -CollectionProfile Full -Memory -OutputPath X:\Collections
-collect -CaseId IR-001 -CollectionProfile MemoryOnly
+recollect -CaseId IR-001 -CollectionProfile Full -Memory -OutputPath X:\Collections
+recollect -CaseId IR-001 -CollectionProfile MemoryOnly
 ```
 
 > **License terms.** Every run starts by showing the license (BSD 3-Clause, including its "as is" warranty disclaimer) and an authorized-use notice, and asks **"Do you agree to these terms? [y/N]"**. Type `y` to continue. Any other answer ends the run before anything is collected or written. The commands below add `-AcceptLicense`, which records your agreement without the prompt; it's required with `-NonInteractive`, and a `-NonInteractive` run without it stops at once. Either way, the acceptance (how and when, in UTC) is recorded in `Collection.log`, `manifest.json` and `manifest.txt`. Read the terms once in [LICENSE](../LICENSE) or by running the script without `-AcceptLicense`.
@@ -114,46 +114,46 @@ collect -CaseId IR-001 -CollectionProfile MemoryOnly
 **Full collection with memory (recommended, collects everything):**
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect_v3.ps1 -CollectionProfile Full -Memory -CaseId IR-001 -NonInteractive -AcceptLicense
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\recollect.ps1 -CollectionProfile Full -Memory -CaseId IR-001 -NonInteractive -AcceptLicense
 ```
 
 **Full, plus everything KAPE can find in older shadow copies (slower, much bigger):**
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect_v3.ps1 -CollectionProfile Full -Memory -KapeVss -CaseId IR-001 -NonInteractive -AcceptLicense
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\recollect.ps1 -CollectionProfile Full -Memory -KapeVss -CaseId IR-001 -NonInteractive -AcceptLicense
 ```
 
 **Memory only (RAM image plus the clock and time zone; about 5 minutes for 32 GB):**
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect_v3.ps1 -CollectionProfile MemoryOnly -CaseId IR-001 -NonInteractive -AcceptLicense
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\recollect.ps1 -CollectionProfile MemoryOnly -CaseId IR-001 -NonInteractive -AcceptLicense
 ```
 
 **Deep (no KAPE or Velociraptor; about 30–60 minutes):**
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect_v3.ps1 -CollectionProfile Deep -Memory -CaseId IR-001 -NonInteractive -AcceptLicense
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\recollect.ps1 -CollectionProfile Deep -Memory -CaseId IR-001 -NonInteractive -AcceptLicense
 ```
 
 **Standard (registry, event logs, Prefetch and the core live tools; about 10 minutes):**
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect_v3.ps1 -CollectionProfile Standard -CaseId IR-001 -NonInteractive -AcceptLicense
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\recollect.ps1 -CollectionProfile Standard -CaseId IR-001 -NonInteractive -AcceptLicense
 ```
 
 **Quick (volatile state only; 2–3 minutes):**
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect_v3.ps1 -CollectionProfile Quick -CaseId IR-001 -NonInteractive -AcceptLicense
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\recollect.ps1 -CollectionProfile Quick -CaseId IR-001 -NonInteractive -AcceptLicense
 ```
 
 **Manual, but asked for the profile** (any parameter except `-CollectionProfile`: the script shows the profile menu):
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Collect_v3.ps1 -CaseId IR-001
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\recollect.ps1 -CaseId IR-001
 ```
 
-Started with **no** parameters at all, `Collect_v3.ps1` runs the guided setup, exactly like `collect`.
+Started with **no** parameters at all, `recollect.ps1` runs the guided setup, exactly like `recollect`.
 
 The results land in `X:\Toolkit\Collections\<CaseId>_<ComputerName>_<UTC time>\`. To send them somewhere else, add `-OutputPath Y:\Evidence`.
 
@@ -228,12 +228,12 @@ The script finds each tool by its **file name**, searching every folder under `T
 
 ## 3. Where to put the files (folder setup)
 
-**In plain terms:** make one folder called `Toolkit` on your USB drive. Put `Collect_v3.ps1` directly inside it. Make a `Tools` folder next to the script and unzip every tool into its own subfolder of `Tools`. **Extract whole folders**, not just the `.exe` files: several tools need the files that ship beside them (Maps, batch files, DLLs).
+**In plain terms:** make one folder called `Toolkit` on your USB drive. Put `recollect.ps1` directly inside it. Make a `Tools` folder next to the script and unzip every tool into its own subfolder of `Tools`. **Extract whole folders**, not just the `.exe` files: several tools need the files that ship beside them (Maps, batch files, DLLs).
 
 ```text
 X:\Toolkit\                              <- any drive letter works
-├── collect.cmd                          <- the launcher (may also go one level up, at X:\)
-├── Collect_v3.ps1                       <- the script
+├── recollect.cmd                        <- the launcher (may also go one level up, at X:\)
+├── recollect.ps1                        <- the script
 ├── docs\USER_GUIDE.md                   <- this guide
 ├── Tools\                               <- every tool goes in here (subfolder names don't matter)
 │   ├── SysinternalsSuite\               <- unzipped Sysinternals Suite (autorunsc64.exe, sigcheck64.exe, ...)
@@ -312,13 +312,13 @@ Times are from the lab laptop writing to a USB 3 drive: Quick 2 minutes, Deep 60
 | `-KapeVolumeTargets` | KAPE targets for extra internal drives | `FileSystem,RecycleBin` |
 | `-VelociraptorArtifact` | List of Velociraptor artifacts | 23 built-ins (section 7.12) |
 | `-VelociraptorArgs` | `Name=Value` parameters passed to **every** artifact | none |
-| `-VelociraptorArtifactArgs` | Parameters for **one** artifact: `@{ 'Windows.EventLogs.RDPAuth' = @('DateAfter=2026-01-01') }`. A hashtable can't be passed through `powershell.exe -File`; launch with `-Command "& .\Collect_v3.ps1 ... -VelociraptorArtifactArgs @{...}"` or run the script directly from an elevated PowerShell prompt. | none |
+| `-VelociraptorArtifactArgs` | Parameters for **one** artifact: `@{ 'Windows.EventLogs.RDPAuth' = @('DateAfter=2026-01-01') }`. A hashtable can't be passed through `powershell.exe -File`; launch with `-Command "& .\recollect.ps1 ... -VelociraptorArtifactArgs @{...}"` or run the script directly from an elevated PowerShell prompt. | none |
 | `-YaraRules C:\path\rules.yar` | **Opt-in, Full only.** Scans process memory with these rules through Velociraptor. The rules file is copied into `Velociraptor\` and hashed. ⚠ Slow, and memory scanning can trigger EDR alerts. The rule text is passed on the command line, so files over ~30,000 characters must be split. To scan only some processes, add `-VelociraptorArtifactArgs @{'Windows.Detection.Yara.Process'=@('ProcessRegex=(?i)notepad')}` (the `-Command` form, see that row). Hits are in `Windows.Detection.Yara.Process.zip` → `results\*.json`. Guided setup offers the rule files in `Tools\YARA\`. | off |
 | `-LolDriversCsv C:\path\drivers.csv` | Local copy of the LOLDrivers export (CSV or JSON from loldrivers.io). Every MD5/SHA-1/SHA-256 in it is matched against `System\drivers_hashed.csv`. Any text file works, so the YAML files from the LOLDrivers repository can simply be concatenated into one file. The log shows how many hashes were loaded and how many drivers matched (column `LolDriversMatch`). No network access. | off |
 | `-DefenderQuarantine` | **Opt-in.** Copy Defender's quarantine to `Security\DefenderQuarantine\`. ⚠ These are **malware samples**. Never enabled by any profile. Use with `-Archive -ArchivePassword`; the script warns loudly if you archive without a password. | off |
 | `-NtpServer` | Compare the clock against an NTP server (needs network) | off |
 | `-Archive` | Zip or 7-Zip the finished collection into `<case folder>.7z`, with a `.7z.sha256` and a `.7z.log` beside it. The case folder itself is kept, unencrypted. | off |
-| `-ArchivePassword` | Encrypt the .7z with AES-256, file names included (pass a SecureString: `(Read-Host 'Archive password' -AsSecureString)`). A SecureString can't pass through `powershell.exe -File`, so use the `-Command "& .\Collect_v3.ps1 ... -ArchivePassword (Read-Host 'Archive password' -AsSecureString)"` form, or run the script directly. The password is given to 7-Zip on its command line, so hosts that log process command lines (Sysmon, event 4688, EDR) record it: use a password unique to the case. | none |
+| `-ArchivePassword` | Encrypt the .7z with AES-256, file names included (pass a SecureString: `(Read-Host 'Archive password' -AsSecureString)`). A SecureString can't pass through `powershell.exe -File`, so use the `-Command "& .\recollect.ps1 ... -ArchivePassword (Read-Host 'Archive password' -AsSecureString)"` form, or run the script directly. The password is given to 7-Zip on its command line, so hosts that log process command lines (Sysmon, event 4688, EDR) record it: use a password unique to the case. | none |
 | `-NoAnalysisReadme` | Don't write the `ANALYSIS_README.txt` guidance files (see section 7). | off (files are written) |
 
 ### 5.1 Extra internal drives
@@ -687,10 +687,10 @@ Not collected: WSL shells keep their `.bash_history` inside the distribution's v
 
 | Message | Meaning / fix |
 |---|---|
-| `Recollect needs administrator rights` | Start it with `collect` and no parameters (guided setup asks Windows for permission), or open the terminal with *Run as administrator* for manual mode |
-| `'collect' is not recognized` in PowerShell | Type `.\collect`: PowerShell doesn't run files from the current folder without `.\` |
-| `Administrator permission was not given` | The Windows permission (UAC) prompt was declined or closed. Run `collect` again and choose **Yes** |
-| `Collect_v3.ps1 was not found` / `More than one copy` | `collect.cmd` looks next to itself, then one folder down. Keep it beside `Collect_v3.ps1`, or at the drive root with a single toolkit folder below it |
+| `Recollect needs administrator rights` | Start it with `recollect` and no parameters (guided setup asks Windows for permission), or open the terminal with *Run as administrator* for manual mode |
+| `'recollect' is not recognized` in PowerShell | Type `.\recollect`: PowerShell doesn't run files from the current folder without `.\` |
+| `Administrator permission was not given` | The Windows permission (UAC) prompt was declined or closed. Run `recollect` again and choose **Yes** |
+| `recollect.ps1 was not found` / `More than one copy` | `recollect.cmd` looks next to itself, then one folder down. Keep it beside `recollect.ps1`, or at the drive root with a single toolkit folder below it |
 | `Memory Only needs WinPmem, Magnet RAM Capture or DumpIt` | Put a memory tool under `Tools\` (section 3), or choose another profile |
 | Guided setup doesn't offer the YARA scan or LOLDrivers matching | It offers YARA only for Full and only with rule files in `Tools\YARA\`; LOLDrivers only for Standard and up, and only with `loldrivers*.csv/json` or the repository's `loldrivers.io\content\api\drivers.csv` under `Tools\`. Use `-YaraRules` / `-LolDriversCsv` in manual mode for files elsewhere |
 | `Skipped ...\<Tool>.exe: needs .NET 10.0.0 runtime` | Harmless. KAPE's bundled copy is used instead (check that a `FOUND` line follows). |
