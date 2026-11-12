@@ -1,12 +1,13 @@
 # Recollect: Windows DFIR Live-Response Collector
 
+```text
       ____    ______  ______  ____    __      __      ______  ______  ______
      / __ \  / ____/ / ____/ / __ \  / /     / /     / ____/ / ____/ /_  __/
     / /_/ / / __/   / /     / / / / / /     / /     / __/   / /       / /
    / _, _/ / /___  / /___  / /_/ / / /___  / /___  / /___  / /___    / /
   /_/ |_| /_____/  \____/  \____/ /_____/ /_____/ /_____/  \____/   /_/
+```
 
-  
 A single PowerShell script that collects forensic evidence from a live Windows machine, in order of volatility. It drives the standard free DFIR toolset (Sysinternals, Eric Zimmerman's tools, KAPE, Velociraptor, WinPmem / Magnet RAM Capture / DumpIt, RawCopy) and writes a hashed, self-documenting collection: a manifest, per-step results, and SHA-256 hashes of every file.
 
 ![PowerShell 5.1](https://img.shields.io/badge/PowerShell-5.1-blue) ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011%20%7C%20Server-informational) ![Version](https://img.shields.io/badge/version-4.0.0-green) ![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue)
